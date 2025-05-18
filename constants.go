@@ -1,4 +1,4 @@
-package spg4
+package sgp4
 
 import "math"
 
@@ -14,6 +14,8 @@ const (
 	xj4           = -0.00000165597 // J4 harmonic
 	torad         = math.Pi / 180.0
 	minutesPerDay = 1440.0
+	we            = 7.2921150e-5 // Earth's angular velocity (rad/sec)
+	a3ovk2        = -0.5 * xj3 / xj2
 
 	// WGS-84 Earth model constants
 	re = 6378.137            // Earth's equatorial radius in km
@@ -43,10 +45,6 @@ type OrbitalElements struct {
 
 // State vector components
 type StateVector struct {
-	X  float64 // Position X (km)
-	Y  float64 // Position Y (km)
-	Z  float64 // Position Z (km)
-	VX float64 // Velocity X (km/s)
-	VY float64 // Velocity Y (km/s)
-	VZ float64 // Velocity Z (km/s)
+	X, Y, Z    float64 // Position components (km)
+	VX, VY, VZ float64 // Velocity components (km/s)
 }
