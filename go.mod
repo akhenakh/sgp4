@@ -1,3 +1,3 @@
-module github.com/akhenakh/spg4
+module github.com/akhenakh/sgp4
 
 go 1.23.4

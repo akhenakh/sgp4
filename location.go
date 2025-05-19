@@ -1,4 +1,4 @@
-package spg4
+package sgp4
 
 import (
 	"math"
@@ -12,59 +12,75 @@ type Location struct {
 }
 
 // TopocentricCoords represents the position of a satellite relative to
-// an observation point in a local horizontal coordinate system
+// an observation point in a local horizontal coordinate system:
 type TopocentricCoords struct {
-	Azimuth   float64 // Azimuth angle in degrees (clockwise from North)
-	Elevation float64 // Elevation angle in degrees above horizon
-	Range     float64 // Slant range in kilometers
-	RangeRate float64 // Range rate in kilometers per second
+	Azimuth   float64 // degrees clockwise from true North (0° to 360°)
+	Elevation float64 // degrees above the local horizon (0° to 90°)
+	Range     float64 // distance in kilometers from observer to satellite
+	RangeRate float64 // rate of change of range in km/s (positive = moving away)
 }
 
 // GetLookAngle calculates the topocentric coordinates (azimuth, elevation, range)
 // of a satellite relative to the given observation location
 func (sv *StateVector) GetLookAngle(loc *Location) *TopocentricCoords {
+	if loc == nil {
+		return nil
+	}
+
+	// Validate latitude range
+	if loc.Latitude < -90 || loc.Latitude > 90 {
+		return nil
+	}
+
 	// Convert observer lat/lon to radians
 	latRad := loc.Latitude * deg2rad
 	lonRad := loc.Longitude * deg2rad
 
 	// Calculate observer position in Earth-fixed coordinates
-	// Convert altitude from meters to kilometers
 	altKm := loc.Altitude / 1000.0
-	cosLat := math.Cos(latRad)
+
+	// WGS-84 Earth radius calculation
 	sinLat := math.Sin(latRad)
-	cosLon := math.Cos(lonRad)
+	cosLat := math.Cos(latRad)
 	sinLon := math.Sin(lonRad)
+	cosLon := math.Cos(lonRad)
 
-	// Earth radius at observation point using WGS-84 ellipsoid
-	c := 1.0 / math.Sqrt(1.0+f*(f-2.0)*sinLat*sinLat)
-	s := (1.0 - f) * (1.0 - f) * c
-	obsX := (re*c + altKm) * cosLat * cosLon
-	obsY := (re*c + altKm) * cosLat * sinLon
-	obsZ := (re*s + altKm) * sinLat
+	// Calculate Earth radius at observer's latitude
+	C := 1.0 / math.Sqrt(1.0+f*(f-2)*sinLat*sinLat)
+	S := (1.0 - f) * (1.0 - f) * C
 
-	// Calculate topocentric coordinates (station-centered)
+	// Observer's position vector
+	obsX := (re*C + altKm) * cosLat * cosLon
+	obsY := (re*C + altKm) * cosLat * sinLon
+	obsZ := (re*S + altKm) * sinLat
+
+	// Vector from observer to satellite (topocentric)
 	rx := sv.X - obsX
 	ry := sv.Y - obsY
 	rz := sv.Z - obsZ
-	rvx := sv.VX
-	rvy := sv.VY
-	rvz := sv.VZ
 
-	// Calculate look angles
-	range_ := math.Sqrt(rx*rx + ry*ry + rz*rz)
-	rangeRate := (rx*rvx + ry*rvy + rz*rvz) / range_
-
-	// Local horizontal coordinates
+	// Convert to topocentric-horizon coordinates (SEZ)
 	top_s := sinLat*cosLon*rx + sinLat*sinLon*ry - cosLat*rz
 	top_e := -sinLon*rx + cosLon*ry
 	top_z := cosLat*cosLon*rx + cosLat*sinLon*ry + sinLat*rz
 
+	// Calculate look angles
+	range_ := math.Sqrt(rx*rx + ry*ry + rz*rz)
+
+	// Range rate calculation using velocity components
+	rdotx := sv.VX - (-we * sv.Y) // Account for Earth rotation
+	rdoty := sv.VY + (we * sv.X)
+	rdotz := sv.VZ
+
+	rangeRate := (rx*rdotx + ry*rdoty + rz*rdotz) / range_
+
+	// Calculate azimuth and elevation
+	elevation := math.Asin(top_z/range_) * rad2deg
+
 	azimuth := math.Atan2(top_e, top_s) * rad2deg
 	if azimuth < 0 {
-		azimuth += 360
+		azimuth += 360.0
 	}
-
-	elevation := math.Asin(top_z/range_) * rad2deg
 
 	return &TopocentricCoords{
 		Azimuth:   azimuth,

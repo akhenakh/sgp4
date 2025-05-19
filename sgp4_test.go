@@ -3,6 +3,7 @@ package sgp4
 import (
 	"math"
 	"testing"
+	"time"
 )
 
 func TestGetPositionWithLatLngAlt(t *testing.T) {
@@ -65,47 +66,135 @@ func TestGetPositionWithLatLngAlt(t *testing.T) {
 	}
 }
 
+// Helper function to convert Geodetic (Lat, Lon, Alt in degrees/km) to ECI
+// for a given DateTime. This is essentially the inverse of ToGeodetic for testing.
+func geodeticToEciForTest(latDeg, lonDeg, altKm float64, dt time.Time, R_earth, flattening float64) Vector {
+	latRad := latDeg * deg2rad
+	lonRad := lonDeg * deg2rad
+
+	e2 := flattening * (2.0 - flattening)
+	sinLat := math.Sin(latRad)
+	cosLat := math.Cos(latRad)
+
+	var N float64
+	if math.Abs(1.0-e2*sinLat*sinLat) < 1e-14 {
+		N = R_earth / math.Sqrt(1e-14)
+	} else {
+		N = R_earth / math.Sqrt(1.0-e2*sinLat*sinLat)
+	}
+
+	// ECEF coordinates
+	ecefX := (N + altKm) * cosLat * math.Cos(lonRad)
+	ecefY := (N + altKm) * cosLat * math.Sin(lonRad)
+	ecefZ := (N*(1.0-e2) + altKm) * sinLat
+
+	// Rotate ECEF to ECI
+	tempEci := Eci{DateTime: dt}
+	gmst := tempEci.GreenwichSiderealTime() // radians
+
+	eciX := ecefX*math.Cos(gmst) - ecefY*math.Sin(gmst)
+	eciY := ecefX*math.Sin(gmst) + ecefY*math.Cos(gmst)
+	eciZ := ecefZ
+
+	return Vector{X: eciX, Y: eciY, Z: eciZ}
+}
+
 func TestToGeodetic(t *testing.T) {
+	// Use a fixed DateTime for all test cases to make GMST predictable. J2000.0 is a good choice.
+	j2000 := time.Date(2000, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	// Constants used by ToGeodetic (these must match what ToGeodetic actually uses)
+	const R_earth_for_test = reSGP4
+	const flattening_for_test = fSGP4
+
 	tests := []struct {
-		name                                  string
-		eci                                   Eci
-		expectedLat, expectedLng, expectedAlt float64
-		tolerance                             float64
+		name        string
+		geodeticIn  struct{ lat, lon, alt float64 } // Input geodetic to derive ECI
+		expectedLat float64                         // Expected output Latitude
+		expectedLng float64                         // Expected output Longitude
+		expectedAlt float64                         // Expected output Altitude
+		tolerance   float64
 	}{
 		{
-			name: "Equatorial position",
-			eci: Eci{
-				Position: Vector{X: re, Y: 0, Z: 0},
-			},
+			name:        "Equatorial position, 0 longitude",
+			geodeticIn:  struct{ lat, lon, alt float64 }{0.0, 0.0, 0.0},
 			expectedLat: 0.0,
 			expectedLng: 0.0,
 			expectedAlt: 0.0,
-			tolerance:   0.1,
+			tolerance:   0.0001, // Should be very precise
 		},
 		{
-			name: "Polar position",
-			eci: Eci{
-				Position: Vector{X: 0, Y: 0, Z: re + 700},
-			},
+			name:        "Equatorial position, 90E longitude",
+			geodeticIn:  struct{ lat, lon, alt float64 }{0.0, 90.0, 0.0},
+			expectedLat: 0.0,
+			expectedLng: 90.0,
+			expectedAlt: 0.0,
+			tolerance:   0.0001,
+		},
+		{
+			name:        "North Polar position",
+			geodeticIn:  struct{ lat, lon, alt float64 }{90.0, 0.0, 700.0}, // Lon can be anything at pole
 			expectedLat: 90.0,
-			expectedLng: 0.0,
+			expectedLng: 0.0, // atan2(0,0) in ECI often yields 0, then GMST subtraction. Result can be arbitrary.
 			expectedAlt: 700.0,
-			tolerance:   0.1,
+			tolerance:   0.0001,
+		},
+		{
+			name:        "South Polar position",
+			geodeticIn:  struct{ lat, lon, alt float64 }{-90.0, 180.0, 200.0}, // Lon can be anything at pole
+			expectedLat: -90.0,
+			expectedLng: 180.0, // Similar to North Pole, output lon can be arbitrary.
+			expectedAlt: 200.0,
+			tolerance:   0.0001,
+		},
+		{
+			name:        "Mid-latitude position",
+			geodeticIn:  struct{ lat, lon, alt float64 }{34.35, 46.30, 100.0},
+			expectedLat: 34.35,
+			expectedLng: 46.30,
+			expectedAlt: 100.0,
+			tolerance:   0.0001,
+		},
+		{
+			name:        "Mid-latitude position, negative longitude",
+			geodeticIn:  struct{ lat, lon, alt float64 }{-22.5, -75.25, 50.5},
+			expectedLat: -22.5,
+			expectedLng: -75.25,
+			expectedAlt: 50.5,
+			tolerance:   0.0001,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lat, lng, alt := tt.eci.ToGeodetic()
+			// Derive ECI input from the geodeticIn for the fixed J2000 time
+			inputEciPos := geodeticToEciForTest(tt.geodeticIn.lat, tt.geodeticIn.lon, tt.geodeticIn.alt, j2000, R_earth_for_test, flattening_for_test)
+			eciArg := Eci{DateTime: j2000, Position: inputEciPos}
+
+			lat, lng, alt := eciArg.ToGeodetic()
 
 			if math.Abs(lat-tt.expectedLat) > tt.tolerance {
-				t.Errorf("Latitude = %f, want %f (±%f)", lat, tt.expectedLat, tt.tolerance)
+				t.Errorf("Latitude = %.6f, want %.6f (Δ%.6f, ±%.6f)", lat, tt.expectedLat, lat-tt.expectedLat, tt.tolerance)
 			}
-			if math.Abs(lng-tt.expectedLng) > tt.tolerance {
-				t.Errorf("Longitude = %f, want %f (±%f)", lng, tt.expectedLng, tt.tolerance)
+
+			// For longitude, special handling for poles and wrap-around
+			if math.Abs(tt.expectedLat) < 89.999 { // If not at a pole
+				deltaLng := math.Abs(lng - tt.expectedLng)
+				if deltaLng > 180.0 { // handles wrap-around (e.g. -179 vs 179)
+					deltaLng = 360.0 - deltaLng
+				}
+				if deltaLng > tt.tolerance {
+					t.Errorf("Longitude = %.6f, want %.6f (Δ%.6f wrapped, ±%.6f)", lng, tt.expectedLng, deltaLng, tt.tolerance)
+				}
+			} else {
+				// At poles, longitude is not well-defined, so we don't strictly check it.
+				// Or we could check if it's within a very wide range or a conventional value if any.
+				// For now, skipping strict check.
+				t.Logf("Skipping strict longitude check at pole for %s (Lat: %.6f)", tt.name, lat)
 			}
+
 			if math.Abs(alt-tt.expectedAlt) > tt.tolerance {
-				t.Errorf("Altitude = %f, want %f (±%f)", alt, tt.expectedAlt, tt.tolerance)
+				t.Errorf("Altitude = %.6f, want %.6f (Δ%.6f, ±%.6f)", alt, tt.expectedAlt, alt-tt.expectedAlt, tt.tolerance)
 			}
 		})
 	}
