@@ -289,6 +289,46 @@ func (tle *TLE) RecoveredSemiMajorAxis() float64 {
 	return math.Pow(xke/meanMotionRadPerMin, 2.0/3.0)
 }
 
+// IsGeostationary checks if the satellite's orbital elements from the TLE
+// suggest it is likely a geostationary satellite.
+// This is based on mean elements and does not guarantee perfect station-keeping.
+func (tle *TLE) IsGeostationary() bool {
+	// Thresholds for geostationary characteristics
+	const meanMotionGeoMin = 0.99 // revs/day (slightly less than 1 sidereal rotation)
+	const meanMotionGeoMax = 1.01 // revs/day (slightly more than 1 sidereal rotation)
+	// Ideal GEO mean motion is approx 1.0027 rev/day relative to fixed stars.
+	// If TLE mean motion is mean solar day relative, then it's closer to 1.0.
+	// Let's use a slightly wider band around 1.0027.
+	// Period = 1436.068 minutes -> Mean motion = 1440 / 1436.068 = 1.0027379 revs/day
+	const idealGeoMeanMotion = minutesPerDay / (minutesPerDay / 1.0027379093509) // approx 1.0027379 revs/day
+	const meanMotionTolerance = 0.05                                             // Allow +/- this much from ideal mean motion
+
+	const maxInclinationDeg = 5.0 // degrees (some GEO sats have slight inclination)
+	const maxEccentricity = 0.05  // (some GEO sats have slight eccentricity)
+
+	// 1. Check Mean Motion (period)
+	// tle.MeanMotion is in revolutions per day.
+	if tle.MeanMotion < (idealGeoMeanMotion-meanMotionTolerance) || tle.MeanMotion > (idealGeoMeanMotion+meanMotionTolerance) {
+		return false
+	}
+
+	// 2. Check Inclination
+	if tle.Inclination > maxInclinationDeg { // Inclination from TLE is already in degrees
+		return false
+	}
+
+	// 3. Check Eccentricity
+	if tle.Eccentricity > maxEccentricity { // Eccentricity from TLE (0.XXXXXXX format)
+		return false
+	}
+
+	// If all checks pass, it's likely geostationary or geosynchronous.
+	// True geostationary implies inclination is very close to zero.
+	// Geosynchronous can have inclination but still a 24-hour (sidereal) period.
+	// The term "geostationary" usually implies near-zero inclination.
+	return true
+}
+
 // SGP4Constants holds values used in SGP4 orbital calculations
 type SGP4Constants struct {
 	Sinio  float64 // Sine of inclination

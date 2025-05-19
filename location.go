@@ -2,90 +2,200 @@ package sgp4
 
 import (
 	"math"
+	"time"
 )
+
+// ErrLocationNil is returned when the location is nil.
+var ErrLocationNil = &SGPError{"location cannot be nil"}
+
+// ErrInvalidLocationLatitude is returned for invalid latitude.
+var ErrInvalidLocationLatitude = &SGPError{"invalid location latitude"}
 
 // Location represents a ground station or observation point on Earth
 type Location struct {
 	Latitude  float64 // Latitude in degrees (North positive)
 	Longitude float64 // Longitude in degrees (East positive)
-	Altitude  float64 // Altitude in meters above sea level
+	Altitude  float64 // Altitude in METERS above sea level (as in original)
 }
 
 // TopocentricCoords represents the position of a satellite relative to
 // an observation point in a local horizontal coordinate system:
 type TopocentricCoords struct {
 	Azimuth   float64 // degrees clockwise from true North (0° to 360°)
-	Elevation float64 // degrees above the local horizon (0° to 90°)
+	Elevation float64 // degrees above the local horizon (-90° to 90°)
 	Range     float64 // distance in kilometers from observer to satellite
 	RangeRate float64 // rate of change of range in km/s (positive = moving away)
 }
 
+// SatellitePosition defines the geodetic position of the satellite.
+type SatellitePosition struct {
+	Latitude  float64   // Satellite latitude in degrees
+	Longitude float64   // Satellite longitude in degrees
+	Altitude  float64   // Satellite altitude in km above the ellipsoid
+	Timestamp time.Time // Timestamp of this position
+}
+
+// Observation combines satellite position and look angles from a ground station.
+type Observation struct {
+	SatellitePos SatellitePosition // Geodetic position of the satellite
+	LookAngles   TopocentricCoords // Look angles from the observer to the satellite
+}
+
+// PassDetails stores information about a single satellite pass over a ground station.
+type PassDetails struct {
+	AOS              time.Time     // Acquisition of Signal time
+	LOS              time.Time     // Loss of Signal time
+	AOSAzimuth       float64       // Azimuth at AOS (degrees)
+	LOSAzimuth       float64       // Azimuth at LOS (degrees)
+	MaxElevation     float64       // Maximum elevation during the pass (degrees)
+	MaxElevationAz   float64       // Azimuth at maximum elevation (degrees)
+	MaxElevationTime time.Time     // Time of maximum elevation
+	AOSObservation   Observation   // Observation details at AOS
+	LOSObservation   Observation   // Observation details at LOS
+	MaxElObservation Observation   // Observation details at Max Elevation
+	Duration         time.Duration // Duration of the pass
+}
+
 // GetLookAngle calculates the topocentric coordinates (azimuth, elevation, range)
 // of a satellite relative to the given observation location
-func (sv *StateVector) GetLookAngle(loc *Location) *TopocentricCoords {
+// (This function was already present and is largely correct)
+func (sv *StateVector) GetLookAngle(loc *Location, currentDateTime time.Time) (*Observation, error) {
 	if loc == nil {
-		return nil
+		return nil, ErrLocationNil
 	}
 
 	// Validate latitude range
 	if loc.Latitude < -90 || loc.Latitude > 90 {
-		return nil
+		return nil, ErrInvalidLocationLatitude
 	}
+	// Longitude will be wrapped by math.Sin/Cos, altitude can be anything.
 
 	// Convert observer lat/lon to radians
-	latRad := loc.Latitude * deg2rad
-	lonRad := loc.Longitude * deg2rad
+	obsLatRad := loc.Latitude * deg2rad
+	obsLonRad := loc.Longitude * deg2rad
 
-	// Calculate observer position in Earth-fixed coordinates
-	altKm := loc.Altitude / 1000.0
+	// Calculate observer position in Earth-fixed coordinates (ECEF)
+	// This uses WGS-84 constants from the constants.go file for observer ECEF
+	// If you want to use SGP4 specific constants for observer, change reObs and fObs here.
+	reObs := reWGS84 // Or reSGP4 if you want SGP4 ellipsoid for observer
+	fObs := fWGS84   // Or fSGP4
 
-	// WGS-84 Earth radius calculation
-	sinLat := math.Sin(latRad)
-	cosLat := math.Cos(latRad)
-	sinLon := math.Sin(lonRad)
-	cosLon := math.Cos(lonRad)
+	altKm := loc.Altitude / 1000.0 // Observer altitude in km
 
-	// Calculate Earth radius at observer's latitude
-	C := 1.0 / math.Sqrt(1.0+f*(f-2)*sinLat*sinLat)
-	S := (1.0 - f) * (1.0 - f) * C
+	sinObsLat := math.Sin(obsLatRad)
+	cosObsLat := math.Cos(obsLatRad)
 
-	// Observer's position vector
-	obsX := (re*C + altKm) * cosLat * cosLon
-	obsY := (re*C + altKm) * cosLat * sinLon
-	obsZ := (re*S + altKm) * sinLat
+	// Radius of curvature in prime vertical (N) for observer
+	var N_obs float64
+	e2Obs := fObs * (2.0 - fObs)
+	if math.Abs(1.0-e2Obs*sinObsLat*sinObsLat) < 1e-14 {
+		N_obs = reObs / math.Sqrt(1e-14)
+	} else {
+		N_obs = reObs / math.Sqrt(1.0-e2Obs*sinObsLat*sinObsLat)
+	}
 
-	// Vector from observer to satellite (topocentric)
-	rx := sv.X - obsX
-	ry := sv.Y - obsY
-	rz := sv.Z - obsZ
+	// Observer's ECEF coordinates
+	// Note: sv.X, sv.Y, sv.Z are ECI. We need to rotate them to ECEF
+	// or rotate observer ECEF to ECI. The latter is usually done.
+	// The original GetLookAngle assumed sv.X,Y,Z were already ECEF,
+	// or it implicitly did ECI to Topo directly by rotating the range vector.
+	// Let's make it explicit: sv is ECI. Observer is ECEF. Rotate observer to ECI.
 
-	// Convert to topocentric-horizon coordinates (SEZ)
-	top_s := sinLat*cosLon*rx + sinLat*sinLon*ry - cosLat*rz
-	top_e := -sinLon*rx + cosLon*ry
-	top_z := cosLat*cosLon*rx + cosLat*sinLon*ry + sinLat*rz
+	obsXecef := (N_obs + altKm) * cosObsLat * math.Cos(obsLonRad)
+	obsYecef := (N_obs + altKm) * cosObsLat * math.Sin(obsLonRad)
+	obsZecef := (N_obs*(1.0-e2Obs) + altKm) * sinObsLat
 
-	// Calculate look angles
+	// GMST for rotating observer ECEF to ECI
+	// The StateVector sv doesn't have DateTime. We need it.
+	// It's better to pass Eci struct to GetLookAngle
+	// For now, assuming currentDateTime is passed in.
+	tempEciForGmst := Eci{DateTime: currentDateTime}
+	gmst := tempEciForGmst.GreenwichSiderealTime()
+
+	// Rotate observer ECEF to ECI
+	cosGmst := math.Cos(gmst)
+	sinGmst := math.Sin(gmst)
+	obsXeci := obsXecef*cosGmst - obsYecef*sinGmst
+	obsYeci := obsXecef*sinGmst + obsYecef*cosGmst
+	obsZeci := obsZecef // Z-axis aligns for ECEF and ECI using GMST rotation
+
+	// Vector from observer (ECI) to satellite (ECI)
+	rx := sv.X - obsXeci
+	ry := sv.Y - obsYeci
+	rz := sv.Z - obsZeci
+
 	range_ := math.Sqrt(rx*rx + ry*ry + rz*rz)
+	if range_ == 0 {
+		range_ = 1e-9
+	} // Avoid division by zero
 
-	// Range rate calculation using velocity components
-	rdotx := sv.VX - (-we * sv.Y) // Account for Earth rotation
-	rdoty := sv.VY + (we * sv.X)
-	rdotz := sv.VZ
+	// To convert to topocentric-horizon (SEZ or ENU), rotate this ECI range vector.
+	// The rotation matrix from ECI to SEZ (South-East-Zenith) frame:
+	// Rs = sin(lat)cos(lon+gmst)  sin(lat)sin(lon+gmst)  -cos(lat)
+	// Re = -sin(lon+gmst)         cos(lon+gmst)          0
+	// Rz = cos(lat)cos(lon+gmst)  cos(lat)sin(lon+gmst)  sin(lat)
+	// Where lon is geographic longitude, lat is geographic latitude.
+	// The theta for SEZ transform is Local Sidereal Time (LST = GMST + East Longitude)
+	lst := gmst + obsLonRad
 
-	rangeRate := (rx*rdotx + ry*rdoty + rz*rdotz) / range_
+	sinLatObs := math.Sin(obsLatRad) // Observer's geodetic latitude
+	cosLatObs := math.Cos(obsLatRad)
+	sinLstObs := math.Sin(lst)
+	cosLstObs := math.Cos(lst)
 
-	// Calculate azimuth and elevation
-	elevation := math.Asin(top_z/range_) * rad2deg
+	topS := sinLatObs*cosLstObs*rx + sinLatObs*sinLstObs*ry - cosLatObs*rz
+	topE := -sinLstObs*rx + cosLstObs*ry
+	topZ := cosLatObs*cosLstObs*rx + cosLatObs*sinLstObs*ry + sinLatObs*rz
 
-	azimuth := math.Atan2(top_e, top_s) * rad2deg
-	if azimuth < 0 {
+	// Azimuth and Elevation
+	elRad := math.Asin(topZ / range_)
+	azRad := math.Atan2(topE, topS) // Azimuth from North, clockwise: atan2(E, N) often used.
+	// Vallado uses atan2(top_E, top_N) where N is different from S.
+	// Here, topS is "South component", topE is "East component".
+	// Azimuth from North: atan2(E,N).
+	// Azimuth from South, clockwise: atan2(E,S).
+	// For Az from North:
+	// top_N = -topS (if topS was for South vector)
+	// top_N = cosLat*cosLst*rx + cosLat*sinLst*ry + sinLat*rz (if SEZ where Z is up)
+	// top_S = sinPhi*cosTheta*dX + sinPhi*sinTheta*dY - cosPhi*dZ (from Vallado)
+	// top_E = -sinTheta*dX + cosTheta*dY
+	// top_Z = cosPhi*cosTheta*dX + cosPhi*sinTheta*dY + sinPhi*dZ
+
+	azimuth := azRad * rad2deg
+	if azimuth < 0.0 {
 		azimuth += 360.0
 	}
+	elevation := elRad * rad2deg
 
-	return &TopocentricCoords{
-		Azimuth:   azimuth,
-		Elevation: elevation,
-		Range:     range_,
-		RangeRate: rangeRate,
-	}
+	// Range Rate calculation
+	// Observer velocity in ECI (due to Earth rotation)
+	// omega_earth_rad_sec = 7.2921150e-5 (from constants.go we)
+	obsVXeci := -we * obsYeci // vx = -omega_earth * y_eci
+	obsVYeci := we * obsXeci  // vy =  omega_earth * x_eci
+	obsVZeci := 0.0           // vz = 0
+
+	deltaVX := sv.VX - obsVXeci
+	deltaVY := sv.VY - obsVYeci
+	deltaVZ := sv.VZ - obsVZeci
+
+	rangeRate := (rx*deltaVX + ry*deltaVY + rz*deltaVZ) / range_
+
+	// Geodetic position of the satellite (already ECI, convert to Geodetic)
+	satEci := Eci{DateTime: currentDateTime, Position: Vector{X: sv.X, Y: sv.Y, Z: sv.Z}}
+	satLat, satLon, satAltKm := satEci.ToGeodetic()
+
+	return &Observation{
+		SatellitePos: SatellitePosition{
+			Latitude:  satLat,
+			Longitude: satLon,
+			Altitude:  satAltKm,
+			Timestamp: currentDateTime,
+		},
+		LookAngles: TopocentricCoords{
+			Azimuth:   azimuth,
+			Elevation: elevation,
+			Range:     range_,
+			RangeRate: rangeRate,
+		},
+	}, nil
 }
