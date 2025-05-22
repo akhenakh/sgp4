@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const MinElevationForPass = 0.0 // degrees
+const MinElevationForPass = 10.0 // degrees
 
 type Eci struct {
 	DateTime time.Time
@@ -39,7 +39,7 @@ func (eci *Eci) ToGeodetic() (lat, lon, alt float64) {
 	var oldLat float64
 	var c_iter float64
 
-	for i := 0; i < maxIter; i++ {
+	for range maxIter {
 		oldLat = lat
 		sinLat := math.Sin(lat)
 		if math.Abs(1.0-e2*sinLat*sinLat) < 1e-14 { // Avoid division by zero or sqrt of negative
@@ -168,7 +168,7 @@ func (tle *TLE) FindPosition(tsince float64) (Eci, error) {
 	var sinepw, cosepw, ecose, esine float64
 	max_newton_raphson := 1.25 * math.Abs(math.Sqrt(elsq)) // Cap on N-R step
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		sinepw = math.Sin(epw)
 		cosepw = math.Cos(epw)
 		ecose = axn*cosepw + ayn_lpp*sinepw // e_k cos(E_k_ecc)
@@ -201,11 +201,8 @@ func (tle *TLE) FindPosition(tsince float64) (Eci, error) {
 	}
 
 	// Short period preliminary quantities
-	temp21_sp := 1.0 - elsq // 1 - (e_k)^2 = (beta_k)^2
-	if temp21_sp < 0.0 {
-		temp21_sp = 0.0
-	} // Ensure non-negative for sqrt
-	pl := a * temp21_sp // semi-latus rectum p_k = a_k * (1 - (e_k)^2)
+	temp21_sp := max(1.0-elsq, 0.0) // Ensure non-negative for sqrt
+	pl := a * temp21_sp             // semi-latus rectum p_k = a_k * (1 - (e_k)^2)
 	if pl < 0.0 {
 		return Eci{}, fmt.Errorf("SGP4 propagation error: pl %f < 0", pl)
 	}
@@ -365,14 +362,6 @@ func (tle *TLE) GeneratePasses(obsLat, obsLng, obsAltMeters float64, start, stop
 			continue
 		}
 
-		// Convert StateVector from ECI to our StateVector for GetLookAngle
-		// Note: FindPosition already returns Eci struct which has Position and Velocity as Vector
-		// GetLookAngle needs StateVector, so we construct it.
-		// A bit redundant; ideally GetLookAngle would take Eci.Position and Eci.Velocity directly.
-		// For now, adapting to existing GetLookAngle signature that expects StateVector from this package.
-		// The GetLookAngle in location.go takes *StateVector. We need to pass it.
-		// Our StateVector is defined with X,Y,Z,VX,VY,VZ matching Eci.Position & Eci.Velocity.
-
 		sv := &StateVector{
 			X: eciState.Position.X, Y: eciState.Position.Y, Z: eciState.Position.Z,
 			VX: eciState.Velocity.X, VY: eciState.Velocity.Y, VZ: eciState.Velocity.Z,
@@ -392,24 +381,25 @@ func (tle *TLE) GeneratePasses(obsLat, obsLng, obsAltMeters float64, start, stop
 		if isCurrentlyVisible {
 			if currentPass == nil { // Start of a new pass (AOS)
 				currentPass = &PassDetails{
-					AOS:        currentTime,
-					AOSAzimuth: currentObservation.LookAngles.Azimuth,
-					// AOSObservation: *currentObservation, // Deep copy if Observation is complex
-					MaxElevation:     currentObservation.LookAngles.Elevation,
+					AOS:              currentTime,
+					AOSAzimuth:       currentObservation.LookAngles.Azimuth,
+					MaxElevation:     currentObservation.LookAngles.Elevation, // Initialize with first point
 					MaxElevationAz:   currentObservation.LookAngles.Azimuth,
 					MaxElevationTime: currentTime,
-					// MaxElObservation: *currentObservation,
+					AOSObservation:   *currentObservation,
+					MaxElObservation: *currentObservation, // Set initial MaxElObservation
+					DataPoints:       []PassDataPoint{},   // Initialize the slice
 				}
-				// Refine AOS time - simple approach: use current step time.
-				// More advanced: interpolate between prev (below horizon) and current (above).
-				if prevObservation != nil && prevObservation.LookAngles.Elevation < MinElevationForPass {
-					// Interpolate for more precise AOS time (optional, adds complexity)
-					// For now, using current step as AOS.
-					// To refine, one would solve for Elevation(t) = MinElevationForPass
-					// between prevObservation.Timestamp and currentTime.
-				}
-				currentPass.AOSObservation = *currentObservation // Store observation at this (approx) AOS
 			}
+
+			// Add data point to the current pass
+			currentPass.DataPoints = append(currentPass.DataPoints, PassDataPoint{
+				Timestamp: currentTime,
+				Azimuth:   currentObservation.LookAngles.Azimuth,
+				Elevation: currentObservation.LookAngles.Elevation,
+				Range:     currentObservation.LookAngles.Range,
+				RangeRate: currentObservation.LookAngles.RangeRate,
+			})
 
 			// Update max elevation for the current pass
 			if currentObservation.LookAngles.Elevation > currentPass.MaxElevation {
@@ -422,23 +412,16 @@ func (tle *TLE) GeneratePasses(obsLat, obsLng, obsAltMeters float64, start, stop
 			if currentPass != nil { // End of the current pass (LOS)
 				currentPass.LOS = currentTime
 				currentPass.LOSAzimuth = currentObservation.LookAngles.Azimuth
-				// currentPass.LOSObservation = *currentObservation // Observation at this (approx) LOS
 
-				// Refine LOS time (optional)
-				// Similar to AOS, one could interpolate between prev (above horizon)
-				// and current (below horizon) for a more precise LOS.
-				// For now, using previous step if that was visible, or current if interpolation done.
+				// Take LOS details from the last point that was visible (prevObservation) if available
+				// or the current one if it just dropped below the horizon
 				if prevObservation != nil && prevObservation.LookAngles.Elevation >= MinElevationForPass {
 					currentPass.LOS = prevObservation.SatellitePos.Timestamp // LOS is end of previous visible step
 					currentPass.LOSAzimuth = prevObservation.LookAngles.Azimuth
 					currentPass.LOSObservation = *prevObservation
-				} else { // This happens if sat is already below horizon, AOS was missed or it's first step.
-					// If prevObservation is nil or also below horizon, this means something is off or first step is below horizon
-					// In this case, the current time is the first time we noticed it's below horizon after being visible.
-					// So, if we entered this 'else' block, it means currentObservation.Elevation < MinElevationForPass.
-					// If currentPass is not nil, it means the *previous* step was visible.
-					// So, the LOS event happened *between* prevObservation.Timestamp and currentTime.
-					// We set LOS to prevObservation.Timestamp which is the last known visible point.
+				} else {
+					// Fallback: If somehow prevObservation isn't above horizon, use current (less ideal for LOS)
+					currentPass.LOSObservation = *currentObservation
 				}
 
 				currentPass.Duration = currentPass.LOS.Sub(currentPass.AOS)
@@ -456,12 +439,11 @@ func (tle *TLE) GeneratePasses(obsLat, obsLng, obsAltMeters float64, start, stop
 		currentPass.LOS = stop      // Pass extends to the end of the window
 		if prevObservation != nil { // Use the last valid observation for LOS details
 			currentPass.LOSAzimuth = prevObservation.LookAngles.Azimuth
-			currentPass.LOSObservation = *prevObservation // Corrected: was currentObservation
+			currentPass.LOSObservation = *prevObservation
 		}
-		// If prevObservation is nil (e.g., pass started and ended within one step exactly at stop time, unlikely but possible)
-		// and currentPass is not nil, it means the AOS was at 'stop' time.
-		// In this specific edge case, AOSObservation would have been set.
-		// It's safer to rely on prevObservation if available for the last known state.
+		// No need for 'else if currentObservation != nil' here, as currentObservation is out of scope.
+		// If prevObservation is nil, it implies pass started and finished within a single step at stop time,
+		// and AOSObservation would hold the only point.
 
 		currentPass.Duration = currentPass.LOS.Sub(currentPass.AOS)
 		passes = append(passes, *currentPass)

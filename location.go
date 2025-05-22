@@ -41,24 +41,33 @@ type Observation struct {
 	LookAngles   TopocentricCoords // Look angles from the observer to the satellite
 }
 
+// PassDataPoint stores the calculated data for a single point during a pass.
+type PassDataPoint struct {
+	Timestamp time.Time
+	Azimuth   float64 // degrees
+	Elevation float64 // degrees
+	Range     float64 // km
+	RangeRate float64 // km/s
+}
+
 // PassDetails stores information about a single satellite pass over a ground station.
 type PassDetails struct {
-	AOS              time.Time     // Acquisition of Signal time
-	LOS              time.Time     // Loss of Signal time
-	AOSAzimuth       float64       // Azimuth at AOS (degrees)
-	LOSAzimuth       float64       // Azimuth at LOS (degrees)
-	MaxElevation     float64       // Maximum elevation during the pass (degrees)
-	MaxElevationAz   float64       // Azimuth at maximum elevation (degrees)
-	MaxElevationTime time.Time     // Time of maximum elevation
-	AOSObservation   Observation   // Observation details at AOS
-	LOSObservation   Observation   // Observation details at LOS
-	MaxElObservation Observation   // Observation details at Max Elevation
-	Duration         time.Duration // Duration of the pass
+	AOS              time.Time       // Acquisition of Signal time
+	LOS              time.Time       // Loss of Signal time
+	AOSAzimuth       float64         // Azimuth at AOS (degrees)
+	LOSAzimuth       float64         // Azimuth at LOS (degrees)
+	MaxElevation     float64         // Maximum elevation during the pass (degrees)
+	MaxElevationAz   float64         // Azimuth at maximum elevation (degrees)
+	MaxElevationTime time.Time       // Time of maximum elevation
+	AOSObservation   Observation     // Observation details at AOS
+	LOSObservation   Observation     // Observation details at LOS
+	MaxElObservation Observation     // Observation details at Max Elevation
+	Duration         time.Duration   // Duration of the pass
+	DataPoints       []PassDataPoint // Slice of data points for plotting the pass path
 }
 
 // GetLookAngle calculates the topocentric coordinates (azimuth, elevation, range)
 // of a satellite relative to the given observation location
-// (This function was already present and is largely correct)
 func (sv *StateVector) GetLookAngle(loc *Location, currentDateTime time.Time) (*Observation, error) {
 	if loc == nil {
 		return nil, ErrLocationNil
@@ -95,20 +104,11 @@ func (sv *StateVector) GetLookAngle(loc *Location, currentDateTime time.Time) (*
 	}
 
 	// Observer's ECEF coordinates
-	// Note: sv.X, sv.Y, sv.Z are ECI. We need to rotate them to ECEF
-	// or rotate observer ECEF to ECI. The latter is usually done.
-	// The original GetLookAngle assumed sv.X,Y,Z were already ECEF,
-	// or it implicitly did ECI to Topo directly by rotating the range vector.
-	// Let's make it explicit: sv is ECI. Observer is ECEF. Rotate observer to ECI.
-
 	obsXecef := (N_obs + altKm) * cosObsLat * math.Cos(obsLonRad)
 	obsYecef := (N_obs + altKm) * cosObsLat * math.Sin(obsLonRad)
 	obsZecef := (N_obs*(1.0-e2Obs) + altKm) * sinObsLat
 
 	// GMST for rotating observer ECEF to ECI
-	// The StateVector sv doesn't have DateTime. We need it.
-	// It's better to pass Eci struct to GetLookAngle
-	// For now, assuming currentDateTime is passed in.
 	tempEciForGmst := Eci{DateTime: currentDateTime}
 	gmst := tempEciForGmst.GreenwichSiderealTime()
 
@@ -130,11 +130,6 @@ func (sv *StateVector) GetLookAngle(loc *Location, currentDateTime time.Time) (*
 	} // Avoid division by zero
 
 	// To convert to topocentric-horizon (SEZ or ENU), rotate this ECI range vector.
-	// The rotation matrix from ECI to SEZ (South-East-Zenith) frame:
-	// Rs = sin(lat)cos(lon+gmst)  sin(lat)sin(lon+gmst)  -cos(lat)
-	// Re = -sin(lon+gmst)         cos(lon+gmst)          0
-	// Rz = cos(lat)cos(lon+gmst)  cos(lat)sin(lon+gmst)  sin(lat)
-	// Where lon is geographic longitude, lat is geographic latitude.
 	// The theta for SEZ transform is Local Sidereal Time (LST = GMST + East Longitude)
 	lst := gmst + obsLonRad
 
@@ -150,16 +145,9 @@ func (sv *StateVector) GetLookAngle(loc *Location, currentDateTime time.Time) (*
 	// Azimuth and Elevation
 	elRad := math.Asin(topZ / range_)
 	azRad := math.Atan2(topE, topS) // Azimuth from North, clockwise: atan2(E, N) often used.
-	// Vallado uses atan2(top_E, top_N) where N is different from S.
 	// Here, topS is "South component", topE is "East component".
 	// Azimuth from North: atan2(E,N).
 	// Azimuth from South, clockwise: atan2(E,S).
-	// For Az from North:
-	// top_N = -topS (if topS was for South vector)
-	// top_N = cosLat*cosLst*rx + cosLat*sinLst*ry + sinLat*rz (if SEZ where Z is up)
-	// top_S = sinPhi*cosTheta*dX + sinPhi*sinTheta*dY - cosPhi*dZ (from Vallado)
-	// top_E = -sinTheta*dX + cosTheta*dY
-	// top_Z = cosPhi*cosTheta*dX + cosPhi*sinTheta*dY + sinPhi*dZ
 
 	azimuth := azRad * rad2deg
 	if azimuth < 0.0 {

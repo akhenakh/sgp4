@@ -386,7 +386,7 @@ func calculateChecksum(line string) (int, error) {
 		return 0, fmt.Errorf("line must be 69 characters long, got %d", len(line))
 	}
 	sum := 0
-	for i := 0; i < 68; i++ { // Iterate over characters 0-67
+	for i := range 68 { // Iterate over characters 0-67
 		char := line[i]
 		if char >= '0' && char <= '9' {
 			sum += int(char - '0')

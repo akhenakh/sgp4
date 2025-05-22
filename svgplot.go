@@ -61,7 +61,7 @@ func (p *PassDetails) GeneratePassPolarSVG() string {
 	svgBuilder.WriteString(fmt.Sprintf(`<svg width="%d" height="%d" xmlns="http://www.w3.org/2000/svg" style="background-color:white;">`, svgWidth, svgHeight))
 
 	// Draw horizon circle (0 degrees elevation)
-	svgBuilder.WriteString(fmt.Sprintf(`<circle cx="%f" cy="%f" r="%f" stroke="%s" stroke-width="%s" fill="none"/>`, float64(plotCenterX), float64(plotCenterY), plotRadius, foregroundColor, gridLineStrokeWidth))
+	svgBuilder.WriteString(fmt.Sprintf(`<circle cx="%f" cy="%f" r="%d" stroke="%s" stroke-width="%s" fill="none"/>`, float64(plotCenterX), float64(plotCenterY), plotRadius, foregroundColor, gridLineStrokeWidth))
 
 	// Draw elevation circles and their labels
 	elevationsToMark := []float64{10.0, 30.0, 60.0}

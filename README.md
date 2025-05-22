@@ -145,3 +145,8 @@ for i, pass := range passes {
 ## License
 
 Apache 2.0
+
+
+## TODO
+- reuse the same mechanism to find the exact AOC a sampling more than in the lookup
+- make the min elevation a parameter
