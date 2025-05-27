@@ -48,8 +48,11 @@ func (tle *TLE) EpochTime() time.Time {
 	epochBaseDay := baseDate.AddDate(0, 0, days-1)
 
 	// Calculate nanoseconds from the fractional day
-	totalSecondsInDay := fractionalDay * 24 * 60 * 60
-	totalNanosInDay := int64(totalSecondsInDay * 1e9)
+	// 86400 seconds in a day. 1e9 nanoseconds in a second.
+	// totalNanosInDayFloat := fractionalDay * 86400.0 * 1e9
+	// Using math.Round helps to get the closest integer nanosecond value,
+	// mitigating floating point inaccuracies that might cause off-by-one errors.
+	totalNanosInDay := int64(math.Round(fractionalDay * 86400.0 * 1e9))
 
 	return epochBaseDay.Add(time.Duration(totalNanosInDay))
 }

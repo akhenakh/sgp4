@@ -1,12 +1,18 @@
 # Go SGP4 Satellite Propagation Library
 
-This Go package provides functionality to parse Two-Line Element (TLE) sets and propagate satellite orbits using an SGP4-compatible model. The goal is to closely match the reference SGP4 propagator used by NORAD and Space-Track for near-Earth objects.
+
+A Go (Golang) library for satellite propagation using the SGP4 model.
+
+This library allows you to predict the position and velocity of Earth-orbiting satellites given their orbital elements, typically from Two-Line Element (TLE) sets or Orbit Mean-elements Message (OMM) JSON data.
+
 
 This an AI assisted port of the spg4 library from **Daniel Warner** ([github.com/dnwrnr/sgp4/](https://github.com/dnwrnr/sgp4/)).
 
 ## Features
 
 *   **TLE Parsing:** Parses standard TLE format (2-line or 3-line with satellite name) into structured data. Includes checksum validation.
+    * Parses OMM (Orbit Mean-elements Message) JSON data.**
+    *  Supports conversion from OMM objects to TLE objects for use with the SGP4 propagator.
 *   **SGP4 Propagation:**
     *   Initializes orbital elements and internal constants according to SGP4 methodology.
     *   Propagates satellite ECI (Earth-Centered Inertial) position and velocity over time:
