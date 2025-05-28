@@ -74,6 +74,7 @@ func (eci *Eci) ToGeodetic() (lat, lon, alt float64) {
 }
 
 // FindPosition propagates the TLE to the given time offset (tsince) in minutes
+// FindPosition propagates the TLE to the given time offset (tsince) in minutes
 func (tle *TLE) FindPosition(tsince float64) (Eci, error) {
 	elems, err := tle.Initialize()
 	if err != nil {
@@ -122,23 +123,23 @@ func (tle *TLE) FindPosition(tsince float64) (Eci, error) {
 	xl := xmp + omega + xnode + elems.n*templ // current mean longitude (M + omega + Omega)
 
 	// Ensure eccentricity is within sane bounds
-	if e <= -0.001 {
-		return Eci{}, fmt.Errorf("SGP4 propagation error: eccentricity %f <= -0.001", e)
+	if e <= -0.001 { // Check current eccentricity 'e'
+		return Eci{}, &SGP4ModelLimitsError{Tsince: tsince, Reason: ReasonEccentricityTooLow, Value: e}
 	} else if e < 1.0e-6 {
 		e = 1.0e-6
 	} else if e > (1.0 - 1.0e-6) { // Near parabolic
+		// SGP4 usually caps this, but if we wanted to error:
+		// return Eci{}, &SGP4ModelLimitsError{Tsince: tsince, Reason: ReasonEccentricityTooHigh, Value: e}
 		e = 1.0 - 1.0e-6
-		// Could also throw an error here, as SGP4 is not for parabolic/hyperbolic
 	}
 
 	// Call CalculateFinalPositionVelocity equivalent
 	// This is where short-period perturbations are applied.
 	// Constants cosio, sinio, x3thm1, x1mth2, xlcof, aycof are from the *initial* inclination (elems.cosio etc)
 	// x7thm1 was calculated during Initialize as well
-
-	beta2 := 1.0 - e*e // current beta_sq
-	if beta2 < 0.0 {   // Should not happen if e is capped correctly
-		return Eci{}, fmt.Errorf("SGP4 propagation error: beta2 %f < 0", beta2)
+	beta2 := 1.0 - e*e // current beta_sq, based on current 'e'
+	if beta2 < 0.0 {   // Should not happen if e is capped correctly to < 1
+		return Eci{}, &SGP4ModelLimitsError{Tsince: tsince, Reason: ReasonBeta2Negative, Value: beta2, Message: fmt.Sprintf("based on current eccentricity e=%.6e", e)}
 	}
 	xn := xke / math.Pow(a, 1.5) // current mean motion (rad/min)
 
@@ -155,8 +156,7 @@ func (tle *TLE) FindPosition(tsince float64) (Eci, error) {
 		// This can happen if perturbations drive eccentricity too high.
 		// For robust code, might cap elsq or return error.
 		// libsgp4 throws "Error: (elsq >= 1.0)"
-		return Eci{}, fmt.Errorf("SGP4 propagation error: elsq %f >= 1.0", elsq)
-
+		return Eci{}, &SGP4ModelLimitsError{Tsince: tsince, Reason: ReasonPerturbedEccSqTooHigh, Value: elsq}
 	}
 
 	// Solve Kepler's equation for L' (eccentric longitude)
@@ -185,26 +185,15 @@ func (tle *TLE) FindPosition(tsince float64) (Eci, error) {
 			} else if delta_epw < -max_newton_raphson {
 				delta_epw = -max_newton_raphson
 			}
-		} else { // Apply 2nd order correction (Vallado / SGP4.cc)
-			// This formula from SGP4.cc is f / (fdot - 0.5 * d2f * f/fdot) which simplifies for Kepler's eq
-			// d2f = esine; delta_epw_prev = f/fdot from previous step of this loop or first step
-			// SGP4.cc actually uses delta_epw = f / (fdot + 0.5 * esine * delta_epw_from_prev_or_capped_step)
-			// For simplicity, using first-order correction is often sufficient if iterations are enough.
-			// Using the SGP4.cc style:
-			// delta_epw = f_kepler / (fdot_kepler + 0.5*esine*delta_epw) // (Using current delta_epw, a bit recursive)
-			// Let's stick to simpler first order for now unless issues. The loop should converge.
 		}
 		epw += delta_epw
-		if i == 9 {
-			// fmt.Printf("Warning: Kepler solver did not converge fully for tsince %f\n", tsince)
-		}
 	}
 
 	// Short period preliminary quantities
 	temp21_sp := max(1.0-elsq, 0.0) // Ensure non-negative for sqrt
 	pl := a * temp21_sp             // semi-latus rectum p_k = a_k * (1 - (e_k)^2)
-	if pl < 0.0 {
-		return Eci{}, fmt.Errorf("SGP4 propagation error: pl %f < 0", pl)
+	if pl < 0.0 {                   // Should be caught by elsq >= 1.0 or a < 0 (if tempa becomes very negative)
+		return Eci{}, &SGP4ModelLimitsError{Tsince: tsince, Reason: ReasonSemiLatusRectumNegative, Value: pl}
 	}
 
 	r_val := a * (1.0 - ecose) // distance from primary focus r_k = a_k * (1 - e_k cos(E_k_ecc))
@@ -225,9 +214,9 @@ func (tle *TLE) FindPosition(tsince float64) (Eci, error) {
 		temp33_sp = 1.0e12 // Avoid division by zero, effectively making next terms small
 	}
 
-	cosu_sp := temp32_sp * (cosepw - axn + ayn_lpp*esine*temp33_sp) // cos(u_k) where u_k is arg lat from node
-	sinu_sp := temp32_sp * (sinepw - ayn_lpp - axn*esine*temp33_sp) // sin(u_k)
-	u_sp := math.Atan2(sinu_sp, cosu_sp)                            // u_k
+	cosu_sp := temp32_sp * (cosepw - axn + ayn_lpp*esine*temp33_sp)
+	sinu_sp := temp32_sp * (sinepw - ayn_lpp - axn*esine*temp33_sp)
+	u_sp := math.Atan2(sinu_sp, cosu_sp)
 
 	sin2u_sp := 2.0 * sinu_sp * cosu_sp
 	cos2u_sp := 2.0*cosu_sp*cosu_sp - 1.0
@@ -284,13 +273,10 @@ func (tle *TLE) FindPosition(tsince float64) (Eci, error) {
 	velY := (rdotk_spp*uy + rfdotk_spp*vy_orient) * vFactor
 	velZ := (rdotk_spp*uz + rfdotk_spp*vz_orient) * vFactor
 
-	// Check for decay
-	if rk_spp < 1.0 { // (rk_spp is in Earth Radii)
+	// Check for decay (physical condition)
+	if rk_spp < 1.0 {
 		// Satellite has decayed. SGP4 docs say prediction is unreliable.
-		// libsgp4 throws DecayedException here.
-		// For now, let's return the state but perhaps with a warning or specific error status.
-		// The test uses tsince=0, so decay is unlikely here.
-		// fmt.Printf("Warning: Satellite decayed at tsince %f, rk_spp = %f ER\n", tsince, rk_spp)
+		return Eci{}, &SatelliteDecayedError{Tsince: tsince, Radius: rk_spp}
 	}
 
 	return Eci{
@@ -355,10 +341,28 @@ func (tle *TLE) GeneratePasses(obsLat, obsLng, obsAltMeters float64, start, stop
 
 		eciState, err := tle.FindPosition(tsince)
 		if err != nil {
-			// Log error or decide how to handle propagation errors (e.g., skip this step)
+			// If a propagation error occurs (e.g. decay or model breakdown),
+			// end any current pass and skip this step.
 			// fmt.Printf("Warning: Could not propagate for time %v: %v\n", currentTime, err)
+			if currentPass != nil { // Finalize pass if it was ongoing and propagation fails
+				// Use previous observation for LOS if possible
+				if prevObservation != nil {
+					currentPass.LOS = prevObservation.SatellitePos.Timestamp
+					currentPass.LOSAzimuth = prevObservation.LookAngles.Azimuth
+					currentPass.LOSObservation = *prevObservation
+				} else { // Fallback if no previous point (pass started and ended at this error point)
+					currentPass.LOS = currentTime // Approximate LOS time
+					// LOS Azimuth and Observation might be inaccurate or unavailable here.
+					// Use AOS details if nothing else.
+					currentPass.LOSAzimuth = currentPass.AOSAzimuth
+					currentPass.LOSObservation = currentPass.AOSObservation
+				}
+				currentPass.Duration = currentPass.LOS.Sub(currentPass.AOS)
+				passes = append(passes, *currentPass)
+				currentPass = nil
+			}
 			currentTime = currentTime.Add(stepDuration)
-			prevObservation = nil // Reset prevObservation if there's a gap
+			prevObservation = nil // Reset prevObservation due to error
 			continue
 		}
 
@@ -450,15 +454,6 @@ func (tle *TLE) GeneratePasses(obsLat, obsLng, obsAltMeters float64, start, stop
 	}
 
 	return passes, nil
-}
-
-// SGPError defines a custom error type for SGP4 related errors.
-type SGPError struct {
-	msg string
-}
-
-func (e *SGPError) Error() string {
-	return e.msg
 }
 
 func julianDateTime(t_utc time.Time) float64 {

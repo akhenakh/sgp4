@@ -1,6 +1,7 @@
 package sgp4
 
 import (
+	"errors"
 	"math"
 	"testing"
 	"time"
@@ -197,5 +198,97 @@ func TestToGeodetic(t *testing.T) {
 				t.Errorf("Altitude = %.6f, want %.6f (Δ%.6f, ±%.6f)", alt, tt.expectedAlt, alt-tt.expectedAlt, tt.tolerance)
 			}
 		})
+	}
+}
+
+func TestSatelliteDecay_WithKnownDecayingTLE(t *testing.T) {
+	// TLE for STARLINK-1838 (NORAD ID 47129)
+	// Epoch: 2025 day 128.113... -> 2025-05-08 ~02:42 UTC
+	// Reported decay on 2025-05-08 (same day as TLE epoch).
+	// This TLE has extremely high B* (4.7395E-4) and Mean Motion Dot (0.1945 rev/day^2),
+	// indicating very rapid decay expected shortly after the TLE epoch, likely within hours.
+	// SGP4 often hits eccentricity limits before rk_spp < 1.0 for such cases.
+	// Checksums: Line 1: 6, Line 2: 5 (Verified to be correct)
+	decayingTLEStr := `STARLINK-1838
+1 47129U 20088H   25128.11303883  .19452873  12553-4  47395-3 0  9996
+2 47129  53.0081 164.1277 0004123 289.2946 169.2144 16.45991982247015`
+
+	tle, err := ParseTLE(decayingTLEStr)
+	if err != nil {
+		t.Fatalf("Failed to parse TLE for decay test: %v. TLE:\n%s", err, decayingTLEStr)
+	}
+
+	// Propagation window: from epoch up to ~1.5 days after epoch.
+	// Decay/model breakdown is expected very rapidly, within hours.
+	timeStepMinutes := 5.0           // 5 minute step
+	maxTsinceMinutes := 1.5 * 1440.0 // 1.5 days = 2160 minutes
+
+	foundOrbitFailureIndication := false
+	var actualDecayErr *SatelliteDecayedError
+	var actualModelLimitsErr *SGP4ModelLimitsError
+
+	for tsince := 0.0; tsince <= maxTsinceMinutes; tsince += timeStepMinutes {
+		_, errProp := tle.FindPosition(tsince)
+		if errProp != nil {
+			if errors.As(errProp, &actualDecayErr) {
+				t.Logf("SatelliteDecayedError (rk_spp < 1.0) caught for %s at tsince = %.2f minutes (epoch %s)",
+					tle.Name, tsince, tle.EpochTime().Format(time.RFC3339))
+				t.Logf("Error details: %v", actualDecayErr)
+				foundOrbitFailureIndication = true
+
+				if actualDecayErr.Tsince != tsince {
+					t.Errorf("SatelliteDecayedError.Tsince mismatch: got %.2f, want %.2f", actualDecayErr.Tsince, tsince)
+				}
+				if actualDecayErr.Radius >= 1.0 {
+					t.Errorf("SatelliteDecayedError.Radius unexpected: got %.4f, should be < 1.0", actualDecayErr.Radius)
+				}
+				break
+			} else if errors.As(errProp, &actualModelLimitsErr) {
+				t.Logf("SGP4ModelLimitsError caught for %s at tsince = %.2f minutes (epoch %s)",
+					tle.Name, tsince, tle.EpochTime().Format(time.RFC3339))
+				t.Logf("Error details: %v", actualModelLimitsErr)
+				foundOrbitFailureIndication = true
+
+				if actualModelLimitsErr.Tsince != tsince {
+					t.Errorf("SGP4ModelLimitsError.Tsince mismatch: got %.2f, want %.2f", actualModelLimitsErr.Tsince, tsince)
+				}
+				// Specific checks based on reason can be added here if needed
+				// e.g., if actualModelLimitsErr.Reason == ReasonEccentricityTooLow { ... }
+				break
+			} else {
+				// Any other unexpected error
+				t.Fatalf("Unexpected error during propagation for %s at tsince %.2f (epoch %s): %v", tle.Name, tsince, tle.EpochTime().Format(time.RFC3339), errProp)
+			}
+		}
+		if tsince >= maxTsinceMinutes && !foundOrbitFailureIndication {
+			break
+		}
+	}
+
+	if !foundOrbitFailureIndication {
+		t.Errorf("No orbit failure indication (SatelliteDecayedError or SGP4ModelLimitsError) was triggered for TLE %s (epoch %s) within %.2f minutes (%.1f days). The model might not predict failure for this TLE in the expected way within this timeframe.", tle.Name, tle.EpochTime().Format(time.RFC3339), maxTsinceMinutes, maxTsinceMinutes/1440.0)
+	}
+}
+
+// TestNonDecayAtEpoch ensures that a standard, stable TLE at its epoch (tsince=0)
+// does not incorrectly trigger a decay error.
+func TestNonDecayAtEpoch(t *testing.T) {
+	issTLE := `ISS (ZARYA)
+1 25544U 98067A   25138.37048074  .00007749  00000+0  14567-3 0  9994
+2 25544  51.6369  94.7823 0002558 120.7586  15.7840 15.49587957510533`
+
+	stdTle, err := ParseTLE(issTLE)
+	if err != nil {
+		t.Fatalf("Failed to parse standard ISS TLE: %v", err)
+	}
+	_, err = stdTle.FindPosition(0.0) // At epoch
+	if err != nil {
+		var decayErrCheck *SatelliteDecayedError
+		if errors.As(err, &decayErrCheck) {
+			t.Errorf("Standard ISS TLE at tsince=0.0 unexpectedly reported decay: %v", err)
+		} else {
+			// Other errors at tsince=0 are still problems but not decay specific.
+			t.Errorf("Standard ISS TLE at tsince=0.0 reported unexpected error: %v", err)
+		}
 	}
 }
