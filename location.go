@@ -144,13 +144,7 @@ func (sv *StateVector) GetLookAngle(loc *Location, currentDateTime time.Time) (*
 
 	// Azimuth and Elevation
 	elRad := math.Asin(topZ / range_)
-	// Potentially, if strictly mimicking C++ structure before quadrant adjustments:
-	// Note: You might need to adjust signs/operands based on exact variable definitions (topS, topE)
-	// This example assumes topS and topE relate to sin and cos of the desired angle in a way
-	// that makes topE/topS the direct tangent argument, but signs might need flipping.
-	// The C++ uses -top_e/top_s. You need to map topE, topS to the equivalent sin/cos or -sin/-cos ratio.
-	// IF topS corresponds to the 'cos' part and -topE to the 'sin' part for the angle from North:
-	azRad := AcTan(-topE, topS) // Example mapping, needs verification against variable definitions
+	azRad := AcTan(topE, -topS)
 	// Then apply C++ style quadrant corrections or rely on AcTan's range (0 to 2PI if implemented like C++)
 	// The provided AcTan returns [0, 2*PI), which simplifies things if that's the desired range.
 	azimuth := azRad * rad2deg
