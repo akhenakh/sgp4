@@ -43,7 +43,9 @@ func TestParseTLE(t *testing.T) {
 		{"Epoch Day", tle.EpochDay, 138.37048074, 1e-9, compareFloat}, // Increased precision for EpochDay
 		{"Mean Motion Dot", tle.MeanMotionDot, 0.00007749, 1e-9, compareFloat},
 		{"Mean Motion Dot2", tle.MeanMotionDot2, 0.0, 1e-9, compareFloat},
-		{"B* Drag Term", tle.Bstar, 0.00014567, 1e-9, compareFloat}, // B* from " 14567-3"
+		{"B* Drag Term", tle.Bstar, 0.00014567, 1e-9, compareFloat},              // B* from " 14567-3"
+		{"B* Resolved Mantissa", tle.BstarMantissa, 0.14567, 1e-9, compareFloat}, // B* from " 14567-3"
+		{"B* Exponent", tle.BstarExponent, -3, 0, compareExact},                  // B* from " 14567-3"
 		{"Element Number", tle.ElementNumber, 999, 0, compareExact},
 		{"Checksum1", tle.CheckSum1, 4, 0, compareExact},                 // From TLE string
 		{"EpochTime", tle.EpochTime(), expectedEpoch, 1000, compareTime}, // Epsilon 1000ns = 1µs for time
