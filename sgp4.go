@@ -287,7 +287,7 @@ func (tle *TLE) FindPosition(tsince float64) (Eci, error) {
 	}
 
 	return Eci{
-		DateTime: tle.EpochTime().Add(time.Duration(tsince) * time.Minute),
+		DateTime: tle.EpochTime().Add(time.Duration(tsince * float64(time.Minute))),
 		Position: Vector{X: posX, Y: posY, Z: posZ},
 		Velocity: Vector{X: velX, Y: velY, Z: velZ},
 	}, nil
