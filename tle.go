@@ -63,6 +63,12 @@ func (tle *TLE) EpochTime() time.Time {
 // It accepts either a two-line or three-line format (with satellite name).
 func ParseTLE(input string) (*TLE, error) {
 	lines := strings.Split(strings.TrimSpace(input), "\n")
+	return ParseTLELines(lines)
+}
+
+// ParseTLELines is the same as ParseTLE except its argument is a two-line element set
+// already split into individual lines.
+func ParseTLELines(lines []string) (*TLE, error) {
 	for i, line := range lines { // Trim spaces from each line, useful if input has trailing spaces per line
 		lines[i] = strings.TrimSpace(line)
 	}
