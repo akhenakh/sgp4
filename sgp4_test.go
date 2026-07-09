@@ -419,3 +419,45 @@ func TestFindPositionAtTime_SubMinuteResolution(t *testing.T) {
 		t.Errorf("expected ~30s difference between DateTimes, got %v", expectedDiff)
 	}
 }
+
+func TestInitializeRejectsDeepSpaceOrbit(t *testing.T) {
+	// A GEO element set: mean motion ~1.0027 rev/day => period ~1436 min, well past
+	// the 225 min SDP4 boundary. This package is near-Earth SGP4 only, so Initialize
+	// must reject it rather than return a silently-wrong position.
+	geo := &TLE{
+		Name:         "GEO-DEEP-SPACE",
+		MeanMotion:   1.0027, // rev/day -> period ~1436 min
+		Eccentricity: 0.0003,
+		Inclination:  0.05,
+	}
+
+	_, err := geo.Initialize()
+	if err == nil {
+		t.Fatalf("Initialize accepted a deep-space orbit (period ~%.0f min); want rejection", minutesPerDay/geo.MeanMotion)
+	}
+	var limitErr *SGP4ModelLimitsError
+	if !errors.As(err, &limitErr) {
+		t.Fatalf("Initialize error is %T (%v); want *SGP4ModelLimitsError", err, err)
+	}
+	if limitErr.Reason != ReasonDeepSpaceUnsupported {
+		t.Errorf("Reason = %q; want %q", limitErr.Reason, ReasonDeepSpaceUnsupported)
+	}
+
+	// The rejection must also surface through FindPosition, which calls Initialize.
+	if _, err := geo.FindPosition(0); err == nil {
+		t.Error("FindPosition accepted a deep-space orbit; want rejection")
+	} else if !errors.As(err, &limitErr) {
+		t.Errorf("FindPosition error is %T (%v); want a wrapped *SGP4ModelLimitsError", err, err)
+	}
+
+	// Control: a near-Earth LEO (ISS, ~15.5 rev/day => period ~93 min) still initializes.
+	const issTLE = `1 25544U 98067A   25138.37048074  .00007749  00000+0  14567-3 0  9994
+2 25544  51.6369  94.7823 0002558 120.7586  15.7840 15.49587957510533`
+	iss, perr := ParseTLE(issTLE)
+	if perr != nil {
+		t.Fatalf("parse ISS TLE: %v", perr)
+	}
+	if _, err := iss.Initialize(); err != nil {
+		t.Errorf("Initialize rejected a near-Earth LEO: %v", err)
+	}
+}

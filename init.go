@@ -2,8 +2,27 @@ package sgp4
 
 import "math"
 
+// deepSpacePeriodMin is the orbital period (in minutes) at or above which an orbit
+// is "deep space" and requires the SDP4 model (Vallado's SGP4/SDP4 boundary). This
+// package implements the near-Earth SGP4 model only, so such orbits are rejected in
+// Initialize rather than propagated to a silently-wrong position.
+const deepSpacePeriodMin = 225.0
+
 // Initialize converts TLE data into orbital elements and SGP4 constants
 func (tle *TLE) Initialize() (*OrbitalElements, error) {
+	// Reject deep-space orbits up front. With no SDP4 branch, an orbit whose period
+	// is >= 225 min (MEO, GEO, HEO) would otherwise be propagated to a wrong position
+	// with no error. MeanMotion is in revolutions/day, so period(min) = 1440 / n.
+	if tle.MeanMotion > 0 {
+		if periodMin := minutesPerDay / tle.MeanMotion; periodMin >= deepSpacePeriodMin {
+			return nil, &SGP4ModelLimitsError{
+				Reason:  ReasonDeepSpaceUnsupported,
+				Value:   periodMin,
+				Message: "orbital period >= 225 min requires the SDP4 deep-space model",
+			}
+		}
+	}
+
 	elem := &OrbitalElements{
 		ecc:   tle.Eccentricity,
 		incl:  tle.Inclination * deg2rad,
@@ -111,7 +130,7 @@ func (tle *TLE) Initialize() (*OrbitalElements, error) {
 	}
 	elem.aycof = 0.25 * a3ovk2 * elem.sinio
 
-	// NearSpace specific constants (assuming not deep space for ISS)
+	// NearSpace specific constants (near-earth only; deep-space orbits are rejected in Initialize above)
 	// From SGP4::Initialise when use_deep_space_ is false
 	var c3 float64
 	if elem.ecc > 1.0e-4 {
