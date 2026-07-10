@@ -24,6 +24,7 @@ const (
 	ReasonPerturbedEccSqTooHigh   SGP4ModelLimitsErrorReason = "perturbed eccentricity squared (elsq) >= 1.0"
 	ReasonBeta2Negative           SGP4ModelLimitsErrorReason = "beta2 (1-e^2) negative"
 	ReasonSemiLatusRectumNegative SGP4ModelLimitsErrorReason = "semi-latus rectum (pl) negative"
+	ReasonDeepSpaceUnsupported    SGP4ModelLimitsErrorReason = "deep-space orbit (period >= 225 min) not supported: SDP4 is not implemented"
 )
 
 // SGP4ModelLimitsError is returned when SGP4 internal mathematical limits are exceeded,
