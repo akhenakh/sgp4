@@ -11,8 +11,7 @@ This an AI assisted port of the spg4 library from **Daniel Warner** ([github.com
 ## Features
 
 *   **TLE Parsing:** Parses standard TLE format (2-line or 3-line with satellite name) into structured data. Includes checksum validation.
-    * Parses OMM (Orbit Mean-elements Message) JSON data.**
-    *  Supports conversion from OMM objects to TLE objects for use with the SGP4 propagator.
+*   **OMM / GP data:** Parses OMM JSON (`ParseOMMs`), OMM/General-Perturbations CSV (`ParseOMMsCSV`), or either (`ParseOMMsReader`), and converts to `TLE` for the propagator (`OMM.ToTLE`). The JSON/CSV formats carry a numeric catalog number, so they support catalog numbers above the five digits allowed by the fixed-column TLE layout. `TLE.ToOMM` converts back, and `OMM.ToTLE` tolerates a missing/invalid international designator.
 *   **SGP4 Propagation:**
     *   Initializes orbital elements and internal constants according to SGP4 methodology.
     *   Propagates satellite ECI (Earth-Centered Inertial) position and velocity over time:
@@ -64,7 +63,27 @@ func main() {
 }
 ```
 
-### 2. Propagating Satellite Position
+### 2. Parsing OMM / General-Perturbations data
+
+The OMM JSON and CelesTrak GP CSV formats are not limited to five-digit catalog numbers:
+
+```go
+omms, err := sgp4.ParseOMMsReader(resp.Body) // JSON or CSV, auto-detected
+if err != nil {
+	log.Fatal(err)
+}
+for i := range omms {
+	tle, err := omms[i].ToTLE() // ready for FindPosition / GeneratePasses
+	if err != nil {
+		continue
+	}
+	fmt.Println(tle.Name, tle.SatelliteNumber)
+}
+```
+
+`ParseOMMsCSV` reads a header row and maps columns by name, so column order does not matter. Convert the other way with `tle.ToOMM()`.
+
+### 3. Propagating Satellite Position
 
 ```go
 // Propagate to a specific time
@@ -94,7 +113,7 @@ if tle.IsGeostationary() {
 }
 ```
 
-### 3. Calculating Look Angles
+### 4. Calculating Look Angles
 
 ```go
 // ... (inside main or another function, after getting eciState) ...
@@ -122,7 +141,7 @@ fmt.Printf("Look Angles (Az,El,Range km,RangeRate km/s): %.1f deg, %.1f deg, %.1
 	observation.LookAngles.RangeRate)
 ```
 
-### 4. Generating Pass Predictions
+### 5. Generating Pass Predictions
 
 ```go
 // ... (inside main or another function) ...

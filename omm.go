@@ -3,6 +3,7 @@ package sgp4
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -146,6 +147,10 @@ func ommObjectIDToTleInternational(objectID string) (string, error) {
 }
 
 // ToTLE converts an OMM object to a TLE object.
+//
+// The international designator (OBJECT_ID) is optional here: when it is missing
+// or malformed the converted TLE simply leaves it blank, since it is descriptive
+// and unused by the SGP4 propagator.
 // Note: TLE checksums are not part of OMM data and will be set to 0 in the TLE struct.
 // They would typically be calculated when formatting the TLE struct into text lines.
 func (o *OMM) ToTLE() (*TLE, error) {
@@ -160,10 +165,8 @@ func (o *OMM) ToTLE() (*TLE, error) {
 		tle.Classification = 'U' // Default if not specified
 	}
 
-	var err error
-	tle.International, err = ommObjectIDToTleInternational(o.ObjectID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert ObjectID to TLE International: %w", err)
+	if intl, intlErr := ommObjectIDToTleInternational(o.ObjectID); intlErr == nil {
+		tle.International = intl
 	}
 
 	epochFullYear, epochDayFrac, _, err := ommEpochToTleEpoch(o.EpochStr)
@@ -206,4 +209,55 @@ func (o *OMM) ToTLE() (*TLE, error) {
 	// Mean Motion should be positive.
 
 	return tle, nil
+}
+
+// ToOMM converts a TLE element set to an OMM. It is the inverse of ToTLE over
+// the element fields (checksums are not represented), and lets callers normalise
+// data from a TLE source and an OMM/CSV source to one type. The epoch is written
+// as an ISO 8601 UTC string.
+func (tle *TLE) ToOMM() OMM {
+	return OMM{
+		ObjectName:         tle.Name,
+		ObjectID:           tleObjectIDFromInternational(tle.International),
+		EpochStr:           tle.EpochTime().UTC().Format("2006-01-02T15:04:05.000000"),
+		MeanMotion:         tle.MeanMotion,
+		Eccentricity:       tle.Eccentricity,
+		Inclination:        tle.Inclination,
+		RAOfAscNode:        tle.RightAscension,
+		ArgOfPericenter:    tle.ArgOfPerigee,
+		MeanAnomaly:        tle.MeanAnomaly,
+		EphemerisType:      0,
+		ClassificationType: string(tle.Classification),
+		NoradCatID:         tle.SatelliteNumber,
+		ElementSetNo:       tle.ElementNumber,
+		RevAtEpoch:         tle.RevolutionNumber,
+		BStar:              tle.Bstar,
+		MeanMotionDot:      tle.MeanMotionDot,
+		MeanMotionDDot:     tle.MeanMotionDot2,
+	}
+}
+
+// tleObjectIDFromInternational converts a TLE international designator (e.g.
+// "98067A") to the OMM/CCSDS OBJECT_ID form ("1998-067A"). It returns "" when
+// the designator is empty or unrecognised.
+func tleObjectIDFromInternational(intl string) string {
+	intl = strings.TrimSpace(intl)
+	if intl == "" {
+		return ""
+	}
+	if strings.Contains(intl, "-") {
+		return intl // already in YYYY-NNNPPP form
+	}
+	if len(intl) < 5 {
+		return ""
+	}
+	year, err := strconv.Atoi(intl[:2])
+	if err != nil {
+		return ""
+	}
+	fullYear := 1900 + year
+	if year < 57 {
+		fullYear = 2000 + year
+	}
+	return fmt.Sprintf("%04d-%s", fullYear, intl[2:])
 }
