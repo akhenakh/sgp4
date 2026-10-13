@@ -392,6 +392,134 @@ func TestGeneratePasses_Reference(t *testing.T) {
 	}
 }
 
+// TestGeneratePassesMinElevation validates pass prediction logic with min elevation against
+// the same output at 0 elevation, with the same fixture as TestGeneratePasses_Reference.
+func TestGeneratePassesMinElevation(t *testing.T) {
+	// same fixture as TestGeneratePasses_Reference
+	issTLEStr := `1 25544U 98067A   25247.10182809  .00011777  00000-0  21333-3 0  9997
+2 25544  51.6327 275.9345 0004179 299.5263  60.5309 15.50088696528307`
+
+	tle, err := ParseTLE(issTLEStr)
+	if err != nil {
+		t.Fatalf("Failed to parse TLE: %v", err)
+	}
+
+	// Observer location (Montreal, consistent with previous examples generating similar passes)
+	observer := &Location{
+		Latitude:  45.51,
+		Longitude: -73.59,
+		Altitude:  60.0,
+	}
+
+	// same time window as TestGeneratePasses_Reference
+	startTime, err := time.Parse(time.RFC3339Nano, "2025-09-10T23:09:17.258527Z")
+	if err != nil {
+		t.Fatalf("Failed to parse start time: %v", err)
+	}
+	stopTime := startTime.Add(48 * time.Hour)
+
+	// Run the pass prediction.
+	const (
+		stepSeconds  = 20
+		minElevation = 20.0 // degrees
+	)
+	// instead of copy-pasting the TestGeneratePasses_Reference expected passes
+	// generate them with the original method
+	expectedZeroDegPasses, err := tle.GeneratePasses(
+		observer.Latitude,
+		observer.Longitude,
+		observer.Altitude,
+		startTime,
+		stopTime,
+		stepSeconds,
+	)
+	if err != nil {
+		t.Fatalf("GeneratePasses failed: %v", err)
+	}
+
+	predictedPasses, err := tle.GeneratePassesMinElevation(
+		observer.Latitude,
+		observer.Longitude,
+		observer.Altitude,
+		startTime,
+		stopTime,
+		stepSeconds,
+		minElevation,
+	)
+	if err != nil {
+		t.Fatalf("GeneratePassesMinElevation failed: %v", err)
+	}
+
+	// filter original expected passes to those above min elevation
+	expectedZeroDegFiltered := []PassDetails{}
+	for _, p := range expectedZeroDegPasses {
+		if p.MaxElevation >= minElevation {
+			expectedZeroDegFiltered = append(expectedZeroDegFiltered, p)
+		}
+	}
+
+	// Compare results
+	if len(predictedPasses) != len(expectedZeroDegFiltered) {
+		t.Errorf("Mismatch in number of passes: got %d, want %d", len(predictedPasses), len(expectedZeroDegFiltered))
+		t.Logf("Got passes:")
+		for _, p := range predictedPasses {
+			t.Logf("  AOS: %v, LOS: %v, MaxEl: %.1f", p.AOS, p.LOS, p.MaxElevation)
+		}
+		t.Logf("Want passes:")
+		for _, p := range expectedZeroDegFiltered {
+			t.Logf("  AOS: %v, LOS: %v, MaxEl: %.1f", p.AOS, p.LOS, p.MaxElevation)
+		}
+		t.FailNow()
+	}
+
+	const elTolerance = 0.01
+
+	for i, got := range predictedPasses {
+		want := expectedZeroDegFiltered[i]
+		t.Run(fmt.Sprintf("Pass_%d", i+1), func(t *testing.T) {
+
+			// Check Max Elevation
+			if math.Abs(got.MaxElevation-want.MaxElevation) > elTolerance {
+				t.Errorf("MaxElevation mismatch: got %.2f, want %.2f", got.MaxElevation, want.MaxElevation)
+			}
+			// Check AOS and LOS are strictly inside the corresponding 0-deg window
+			// When min elevation > 0, AOS happens later
+			if !(got.AOS.After(want.AOS)) {
+				t.Errorf("AOS not strictly greater than reference: got %v, want %v", got.AOS, want.AOS)
+			}
+			// When min elevation > 0, LOS happens sooner
+			if !(got.LOS.Before(want.LOS)) {
+				t.Errorf("LOS not strictly smaller than reference: got %v, want %v", got.LOS, want.LOS)
+			}
+
+			// reverse check that the elevation at AOS and LOS is the desired threshold
+			elevationAOS, err := elevationAt(tle, observer, got.AOS)
+			if err != nil {
+				t.Fatalf("elevationAt failed: %v", err)
+			}
+			elevationAOSp1, err := elevationAt(tle, observer, got.AOS.Add(1*time.Second))
+			if err != nil {
+				t.Fatalf("elevationAt failed: %v", err)
+			}
+			if !(elevationAOS <= minElevation && minElevation < elevationAOSp1) {
+				t.Errorf("elevation at AOS doesn't match threshold: el@AOS %.2f, minEl %.2f, el@AOS+1s %.2f", elevationAOS, minElevation, elevationAOSp1)
+			}
+
+			elevationLOS, err := elevationAt(tle, observer, got.LOS)
+			if err != nil {
+				t.Fatalf("elevationAt failed: %v", err)
+			}
+			elevationLOSm1, err := elevationAt(tle, observer, got.LOS.Add(-1*time.Second))
+			if err != nil {
+				t.Fatalf("elevationAt failed: %v", err)
+			}
+			if !(elevationLOS <= minElevation && minElevation < elevationLOSm1) {
+				t.Errorf("elevation at LOS doesn't match threshold: el@LOS %.2f, minEl %.2f, el@LOS-1s %.2f", elevationLOS, minElevation, elevationLOSm1)
+			}
+		})
+	}
+}
+
 func TestFindPositionAtTime_SubMinuteResolution(t *testing.T) {
 	tle, err := ParseTLE("ISS (ZARYA)\n1 25544U 98067A   26144.84170369  .00008909  00000+0  16754-3 0  9996\n2 25544  51.6327  55.6720 0007493  94.5162 265.6683 15.49354393568136")
 	if err != nil {
@@ -460,4 +588,25 @@ func TestInitializeRejectsDeepSpaceOrbit(t *testing.T) {
 	if _, err := iss.Initialize(); err != nil {
 		t.Errorf("Initialize rejected a near-Earth LEO: %v", err)
 	}
+}
+
+func elevationAt(tle *TLE, observer *Location, t time.Time) (float64, error) {
+	eci, err := tle.FindPositionAtTime(t)
+	if err != nil {
+		return 0.0, fmt.Errorf("FindPositionAtTime failed: %v", err)
+	}
+	sv := StateVector{
+		X:  eci.Position.X,
+		Y:  eci.Position.Y,
+		Z:  eci.Position.Z,
+		VX: eci.Velocity.X,
+		VY: eci.Velocity.Y,
+		VZ: eci.Velocity.Z,
+	}
+
+	obs, err := sv.GetLookAngle(observer, eci.DateTime)
+	if err != nil {
+		return 0.0, fmt.Errorf("GetLookAngle failed: %v", err)
+	}
+	return obs.LookAngles.Elevation, nil
 }
