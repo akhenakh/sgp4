@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-const MinElevationForPass = 10.0 // degrees
-
 type Eci struct {
 	DateTime time.Time
 	Position Vector
@@ -322,7 +320,24 @@ func (tle *TLE) FindPositionAtTime(t time.Time) (Eci, error) {
 // alt is observer's altitude in meters above sea level.
 // start, stop are the time window boundaries.
 // stepSeconds is the time step for propagation in seconds.
+// The AOS and LOS of the returned passes define the time the satellite is above the local horizon (0.0 elevation).
 func (tle *TLE) GeneratePasses(obsLat, obsLng, obsAltMeters float64, start, stop time.Time, stepSeconds int) ([]PassDetails, error) {
+	return tle.generatePasses(obsLat, obsLng, obsAltMeters, start, stop, stepSeconds, 0.0)
+}
+
+// GeneratePassesMinElevation is the same as GeneratePasses except
+// the AOS and LOS of the returned passes define the time the satellite is above minElevation (degrees above the horizon).
+// Note that with higher minElevation thresholds and large stepSeconds, passes that rise above minElevation
+// for less that stepSeconds seconds may be missed.
+func (tle *TLE) GeneratePassesMinElevation(obsLat, obsLng, obsAltMeters float64, start, stop time.Time, stepSeconds int, minElevation float64) ([]PassDetails, error) {
+	// reject values GTE 90° because in generatePasses the inequality test is strict (elevation > minElevation)
+	if minElevation < 0.0 || minElevation >= 90.0 {
+		return nil, fmt.Errorf("minElevation must be in the [0,90) degrees range")
+	}
+	return tle.generatePasses(obsLat, obsLng, obsAltMeters, start, stop, stepSeconds, minElevation)
+}
+
+func (tle *TLE) generatePasses(obsLat, obsLng, obsAltMeters float64, start, stop time.Time, stepSeconds int, minElevation float64) ([]PassDetails, error) {
 	if start.After(stop) {
 		return nil, fmt.Errorf("start time must be before stop time")
 	}
@@ -357,7 +372,7 @@ func (tle *TLE) GeneratePasses(obsLat, obsLng, obsAltMeters float64, start, stop
 		return observation.LookAngles.Elevation, nil
 	}
 
-	// findCrossingPoint finds the exact second the satellite crosses the horizon (0° elevation)
+	// findCrossingPoint finds the exact second the satellite crosses the min elevation (defaults to 0° elevation)
 	// between time1 and time2. `findingAOS` should be true for AOS, false for LOS.
 	findCrossingPoint := func(time1, time2 time.Time, findingAOS bool) (time.Time, error) {
 		running := true
@@ -375,15 +390,15 @@ func (tle *TLE) GeneratePasses(obsLat, obsLng, obsAltMeters float64, start, stop
 				return time1, err // Return start time on error
 			}
 
-			if elevation > 0.0 {
-				// Satellite is above horizon
+			if elevation > minElevation {
+				// Satellite is above min elevation (defaults to 0°)
 				if findingAOS {
 					time2 = middleTime
 				} else {
 					time1 = middleTime
 				}
 			} else {
-				// Satellite is below horizon
+				// Satellite is below min elevation (defaults to 0°)
 				if findingAOS {
 					time1 = middleTime
 				} else {
@@ -409,7 +424,7 @@ func (tle *TLE) GeneratePasses(obsLat, obsLng, obsAltMeters float64, start, stop
 			}
 		}
 
-		// Final refinement: step back/forward until just below horizon
+		// Final refinement: step back/forward until just below min elevation (defaults to 0°)
 		running = true
 		cnt = 0
 		for running && cnt < 6 {
@@ -419,7 +434,7 @@ func (tle *TLE) GeneratePasses(obsLat, obsLng, obsAltMeters float64, start, stop
 				break
 			}
 
-			if elevation > 0.0 {
+			if elevation > minElevation {
 				if findingAOS {
 					middleTime = middleTime.Add(-time.Second)
 				} else {
@@ -519,11 +534,11 @@ func (tle *TLE) GeneratePasses(obsLat, obsLng, obsAltMeters float64, start, stop
 			continue
 		}
 
-		if !foundAOS && elevation > 0.0 {
-			// Satellite has risen above horizon
+		if !foundAOS && elevation > minElevation {
+			// Satellite has risen above min elevation (defaults to 0°)
 			var aosTime time.Time
 			if currentTime.Equal(start) {
-				// Already above horizon at start
+				// Already above min elevation at start
 				aosTime = start
 			} else {
 				// Find exact AOS between previousTime and currentTime
@@ -549,8 +564,8 @@ func (tle *TLE) GeneratePasses(obsLat, obsLng, obsAltMeters float64, start, stop
 			aosObs, _ := svAOS.GetLookAngle(observer, aosTime)
 			currentPass.AOSAzimuth = aosObs.LookAngles.Azimuth
 			currentPass.AOSObservation = *aosObs
-		} else if foundAOS && elevation < 0.0 {
-			// Satellite has set below horizon
+		} else if foundAOS && elevation < minElevation {
+			// Satellite has set below min elevation (defaults to 0°)
 			foundAOS = false
 			endOfPass = true
 
