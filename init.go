@@ -10,6 +10,16 @@ const deepSpacePeriodMin = 225.0
 
 // Initialize converts TLE data into orbital elements and SGP4 constants
 func (tle *TLE) Initialize() (*OrbitalElements, error) {
+	// Only SGP4 element sets can be propagated: type 0 is what TLE-derived sets
+	// carry (SGP), type 2 is SGP4. Type 3 (PPT3), 4 (SGP4-XP) and 6 (Special
+	// Perturbations) are different theories, so refuse them rather than return a
+	// position computed with the wrong model.
+	switch tle.EphemerisType {
+	case 0, 2:
+	default:
+		return nil, &UnsupportedEphemerisTypeError{Type: tle.EphemerisType, Name: ephemerisTypeName(tle.EphemerisType)}
+	}
+
 	// Reject deep-space orbits up front. With no SDP4 branch, an orbit whose period
 	// is >= 225 min (MEO, GEO, HEO) would otherwise be propagated to a wrong position
 	// with no error. MeanMotion is in revolutions/day, so period(min) = 1440 / n.

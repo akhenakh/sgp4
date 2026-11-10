@@ -49,3 +49,38 @@ type SGPError struct {
 func (e *SGPError) Error() string {
 	return e.msg
 }
+
+// UnsupportedEphemerisTypeError is returned when an element set declares an
+// ephemeris type this package cannot propagate. Only SGP4 element sets (types 0
+// and 2) are supported: type 3 is PPT3, type 4 is SGP4-XP and type 6 is Special
+// Perturbations, each a different theory, so propagating them with SGP4 would
+// return a silently wrong position.
+type UnsupportedEphemerisTypeError struct {
+	Type int    // EPHEMERIS_TYPE from the element set
+	Name string // Human-readable theory name, empty when unknown
+}
+
+// Error returns the error message for UnsupportedEphemerisTypeError.
+func (e *UnsupportedEphemerisTypeError) Error() string {
+	if e.Name != "" {
+		return fmt.Sprintf("sgp4: ephemeris type %d (%s) is not supported: only SGP4 element sets (types 0 and 2) can be propagated", e.Type, e.Name)
+	}
+	return fmt.Sprintf("sgp4: ephemeris type %d is not supported: only SGP4 element sets (types 0 and 2) can be propagated", e.Type)
+}
+
+// ephemerisTypeName returns the CCSDS name of an EPHEMERIS_TYPE value.
+func ephemerisTypeName(t int) string {
+	switch t {
+	case 0:
+		return "SGP"
+	case 2:
+		return "SGP4"
+	case 3:
+		return "PPT3"
+	case 4:
+		return "SGP4-XP"
+	case 6:
+		return "Special Perturbations"
+	}
+	return ""
+}

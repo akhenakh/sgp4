@@ -33,7 +33,7 @@ This an AI assisted port of the spg4 library from **Daniel Warner** ([github.com
 
 Significant portions of the SGP4 mathematical model and constant initialization logic are based on well-established C++ implementations, such as the one by **Daniel Warner** ([github.com/dnwrnr/sgp4/](https://github.com/dnwrnr/sgp4/)). This Go implementation strives for compatibility and comparable results with such reference libraries.
 
-**Note:** This library currently focuses on near-Earth propagations (SGP4) and does not yet implement the deep-space corrections (SDP4) for objects with periods greater than 225 minutes.
+**Note:** This library currently focuses on near-Earth propagations (SGP4) and does not yet implement the deep-space corrections (SDP4) for objects with periods greater than 225 minutes. Element sets that declare another theory -- `EPHEMERIS_TYPE` 3 (PPT3), 4 (SGP4-XP) or 6 (Special Perturbations) -- are refused with an `UnsupportedEphemerisTypeError` instead of being propagated with SGP4.
 
 ## Basic Usage
 

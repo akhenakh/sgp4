@@ -183,6 +183,7 @@ func (o *OMM) ToTLE() (*TLE, error) {
 	tle.MeanMotionDot2 = o.MeanMotionDDot
 	tle.Bstar = o.BStar
 	tle.ElementNumber = o.ElementSetNo
+	tle.EphemerisType = o.EphemerisType
 
 	// Checksums are not available from OMM.
 	// They are calculated based on the TLE line string format.
@@ -226,7 +227,7 @@ func (tle *TLE) ToOMM() OMM {
 		RAOfAscNode:        tle.RightAscension,
 		ArgOfPericenter:    tle.ArgOfPerigee,
 		MeanAnomaly:        tle.MeanAnomaly,
-		EphemerisType:      0,
+		EphemerisType:      tle.EphemerisType,
 		ClassificationType: string(tle.Classification),
 		NoradCatID:         tle.SatelliteNumber,
 		ElementSetNo:       tle.ElementNumber,

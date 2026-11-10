@@ -208,6 +208,15 @@ func (tle *TLE) parseLine1(line string) error {
 	tle.BstarMantissa = resolvedMantissa
 	tle.BstarExponent = int(bstarExponent)
 
+	// Ephemeris Type (column 63, usually '0'). Type 4 marks an SGP4-XP element
+	// set, which needs a different propagator; Initialize rejects those.
+	if eph := strings.TrimSpace(line[62:63]); eph != "" {
+		tle.EphemerisType, err = strconv.Atoi(eph)
+		if err != nil {
+			return fmt.Errorf("invalid ephemeris type ('%s'): %w", eph, err)
+		}
+	}
+
 	// Element Number (columns 65-68); column 64 is a separator.
 	tle.ElementNumber, err = strconv.Atoi(strings.TrimSpace(line[64:68]))
 	if err != nil {

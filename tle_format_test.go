@@ -261,6 +261,7 @@ func TestTLELinesRefusals(t *testing.T) {
 		{"mean motion derivative too large", func(t *TLE) { t.MeanMotionDot = 1 }},
 		{"B* beyond the exponent field", func(t *TLE) { t.Bstar = 1e10 }},
 		{"international designator too long", func(t *TLE) { t.International = "98067ABCD" }},
+		{"ephemeris type not a single digit", func(t *TLE) { t.EphemerisType = 10 }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
