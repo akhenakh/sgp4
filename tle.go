@@ -25,6 +25,7 @@ type TLE struct {
 	BstarMantissa   float64 // Mantissa of B* with the decimal point resolved (intermediate parse value)
 	BstarExponent   int     // Exponent of B* as parsed from TLE (intermediate parse value)
 	ElementNumber   int
+	EphemerisType   int // EPHEMERIS_TYPE (column 63): 0/2 are SGP4, 4 is SGP4-XP
 	CheckSum1       int
 
 	// Line 2 fields
@@ -132,7 +133,7 @@ func (tle *TLE) parseLine1(line string) error {
 	}
 
 	var err error
-	tle.SatelliteNumber, err = strconv.Atoi(strings.TrimSpace(line[2:7]))
+	tle.SatelliteNumber, err = parseCatalogNumber(line[2:7])
 	if err != nil {
 		return fmt.Errorf("invalid satellite number: %w", err)
 	}
@@ -207,9 +208,7 @@ func (tle *TLE) parseLine1(line string) error {
 	tle.BstarMantissa = resolvedMantissa
 	tle.BstarExponent = int(bstarExponent)
 
-	// Element Set Type (usually 0) and Element Number
-	// Field 63 is Ephemeris Type, field 65-68 is Element Number.
-	// We can ignore ephemeris type for now or parse if needed.
+	// Element Number (columns 65-68); column 64 is a separator.
 	tle.ElementNumber, err = strconv.Atoi(strings.TrimSpace(line[64:68]))
 	if err != nil {
 		return fmt.Errorf("invalid element number: %w", err)
@@ -230,7 +229,7 @@ func (tle *TLE) parseLine2(line string) error {
 	}
 
 	var err error
-	satNum, err := strconv.Atoi(strings.TrimSpace(line[2:7]))
+	satNum, err := parseCatalogNumber(line[2:7])
 	if err != nil {
 		return fmt.Errorf("invalid satellite number in line 2: %w", err)
 	}

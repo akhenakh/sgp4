@@ -10,8 +10,9 @@ This an AI assisted port of the spg4 library from **Daniel Warner** ([github.com
 
 ## Features
 
-*   **TLE Parsing:** Parses standard TLE format (2-line or 3-line with satellite name) into structured data. Includes checksum validation.
-*   **OMM / GP data:** Parses OMM JSON (`ParseOMMs`), OMM/General-Perturbations CSV (`ParseOMMsCSV`), or either (`ParseOMMsReader`), and converts to `TLE` for the propagator (`OMM.ToTLE`). The JSON/CSV formats carry a numeric catalog number, so they support catalog numbers above the five digits allowed by the fixed-column TLE layout. `TLE.ToOMM` converts back, and `OMM.ToTLE` tolerates a missing/invalid international designator.
+*   **TLE Parsing:** Parses standard TLE format (2-line or 3-line with satellite name) into structured data. Catalog numbers use the Alpha-5 encoding above 99999 (`A0000` is 100000, `Z9999` is 339999). Includes checksum validation.
+*   **TLE Writing:** `TLELines` renders lines 1 and 2 with computed checksums, and `TLEString` the three-line form with the name. Values the fixed-column layout cannot hold (a catalog number above 339999, an out-of-range epoch, angle or eccentricity) return an error instead of being truncated.
+*   **OMM / GP data:** Parses OMM JSON (`ParseOMMs`), OMM/General-Perturbations CSV (`ParseOMMsCSV`), or either (`ParseOMMsReader`), and converts to `TLE` for the propagator (`OMM.ToTLE`). `NORAD_CAT_ID` is a plain integer and holds up to nine digits, beyond the TLE ceiling of 339999. `TLE.ToOMM` converts back, and `OMM.ToTLE` tolerates a missing/invalid international designator.
 *   **SGP4 Propagation:**
     *   Initializes orbital elements and internal constants according to SGP4 methodology.
     *   Propagates satellite ECI (Earth-Centered Inertial) position and velocity over time:
@@ -65,7 +66,7 @@ func main() {
 
 ### 2. Parsing OMM / General-Perturbations data
 
-The OMM JSON and CelesTrak GP CSV formats are not limited to five-digit catalog numbers:
+The OMM JSON and CelesTrak GP CSV formats carry the catalog number as an integer, so they are not limited to the five-character TLE field:
 
 ```go
 omms, err := sgp4.ParseOMMsReader(resp.Body) // JSON or CSV, auto-detected
@@ -83,7 +84,21 @@ for i := range omms {
 
 `ParseOMMsCSV` reads a header row and maps columns by name, so column order does not matter. Convert the other way with `tle.ToOMM()`.
 
-### 3. Propagating Satellite Position
+### 3. Writing TLE text
+
+```go
+lines, err := tle.TLELines() // {line 1, line 2}, checksums computed
+if err != nil {
+	log.Fatal(err) // a value the layout cannot hold, e.g. catalog number > 339999
+}
+fmt.Println(lines[0])
+fmt.Println(lines[1])
+
+text, err := tle.TLEString() // three-line form: name padded to 24 columns, then the two lines
+fmt.Println(text)
+```
+
+### 4. Propagating Satellite Position
 
 ```go
 // Propagate to a specific time
@@ -113,7 +128,7 @@ if tle.IsGeostationary() {
 }
 ```
 
-### 4. Calculating Look Angles
+### 5. Calculating Look Angles
 
 ```go
 // ... (inside main or another function, after getting eciState) ...
@@ -141,7 +156,7 @@ fmt.Printf("Look Angles (Az,El,Range km,RangeRate km/s): %.1f deg, %.1f deg, %.1
 	observation.LookAngles.RangeRate)
 ```
 
-### 5. Generating Pass Predictions
+### 6. Generating Pass Predictions
 
 ```go
 // ... (inside main or another function) ...
@@ -166,6 +181,16 @@ for i, pass := range passes {
 	fmt.Printf("  Duration: %v\n", pass.Duration.Truncate(time.Second))
 }
 ```
+
+## Catalog numbers
+
+A catalog number appears in three forms:
+
+* in TLE text, five characters: digits below 100000, the Alpha-5 letter form from 100000 to 339999 (`A0000`-`Z9999`, with `I` and `O` unused);
+* in OMM/GP JSON and CSV, a plain integer, up to nine digits;
+* in `TLE.SatelliteNumber`, the decoded integer.
+
+`ParseTLE` decodes Alpha-5 fields, and `ParseAlpha5` / `FormatAlpha5` convert between a five-character field and the number directly. Objects above 339999 have no TLE representation, so they have to be carried as OMM/GP data; writing such a number with `TLELines` returns an error.
 
 ## Use This Package
 
