@@ -17,7 +17,9 @@ import (
 const (
 	alpha5Letters     = "ABCDEFGHJKLMNPQRSTUVWXYZ"
 	alpha5FirstLetter = 10
-	alpha5Max         = alpha5FirstLetter*10000 + 9999 // 339999, encoded as Z9999
+	// The last prefix letter is Z, so the ceiling is Z9999: 33*10000 + 9999.
+	alpha5LastLetter = alpha5FirstLetter + len(alpha5Letters) - 1
+	alpha5Max        = alpha5LastLetter*10000 + 9999
 )
 
 // ParseAlpha5 decodes a five-character TLE catalog-number field. Below 100000

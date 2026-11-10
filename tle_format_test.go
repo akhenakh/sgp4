@@ -66,6 +66,25 @@ func TestParseAlpha5(t *testing.T) {
 }
 
 func TestFormatAlpha5(t *testing.T) {
+	// The documented examples, including the top of every letter band.
+	examples := map[int]string{
+		0:      "00000",
+		964:    "00964",
+		99999:  "99999",
+		100000: "A0000",
+		148493: "E8493",
+		182931: "J2931",
+		234018: "P4018",
+		301928: "W1928",
+		339999: "Z9999",
+	}
+	for n, want := range examples {
+		got, err := FormatAlpha5(n)
+		if err != nil || got != want {
+			t.Errorf("FormatAlpha5(%d) = %q, %v; want %q", n, got, err, want)
+		}
+	}
+
 	for n := 0; n <= alpha5Max; n++ {
 		field, err := FormatAlpha5(n)
 		if err != nil {
@@ -209,6 +228,28 @@ func TestTLELinesRoundTrip(t *testing.T) {
 		if lines[0] != want[0] || lines[1] != want[1] {
 			t.Errorf("round trip of %q:\n got %q\n     %q\nwant %q\n     %q",
 				want[0], lines[0], lines[1], want[0], want[1])
+		}
+	}
+}
+
+func TestTLELinesAlpha5(t *testing.T) {
+	// Rendering a set whose number is carried by a letter other than A: the
+	// writer must accept the whole Alpha-5 range, not just the first band.
+	for _, field := range []string{"E8493", "J2931", "P4018", "W1928", "Z9999"} {
+		l1, l2 := tleWithCatalog(line1Prefix, line2Prefix, field)
+		tle, err := ParseTLE(l1 + "\n" + l2)
+		if err != nil {
+			t.Errorf("parsing catalog field %q: %v", field, err)
+			continue
+		}
+		lines, err := tle.TLELines()
+		if err != nil {
+			t.Errorf("rendering catalog field %q (number %d): %v", field, tle.SatelliteNumber, err)
+			continue
+		}
+		if lines[0] != l1 || lines[1] != l2 {
+			t.Errorf("round trip of catalog field %q:\n got %q\n     %q\nwant %q\n     %q",
+				field, lines[0], lines[1], l1, l2)
 		}
 	}
 }
