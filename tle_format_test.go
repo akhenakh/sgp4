@@ -293,6 +293,7 @@ func TestTLELinesRefusals(t *testing.T) {
 		{"epoch year after 2056", func(t *TLE) { t.EpochYear = 2057 }},
 		{"epoch year before 1957", func(t *TLE) { t.EpochYear = 1956 }},
 		{"epoch day 367", func(t *TLE) { t.EpochDay = 367 }},
+		{"epoch day 366 in a non-leap year", func(t *TLE) { t.EpochYear = 2025; t.EpochDay = 366 }},
 		{"eccentricity of 1", func(t *TLE) { t.Eccentricity = 1 }},
 		{"inclination above 180", func(t *TLE) { t.Inclination = 181 }},
 		{"zero mean motion", func(t *TLE) { t.MeanMotion = 0 }},

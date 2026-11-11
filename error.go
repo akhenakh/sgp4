@@ -25,6 +25,9 @@ const (
 	ReasonBeta2Negative           SGP4ModelLimitsErrorReason = "beta2 (1-e^2) negative"
 	ReasonSemiLatusRectumNegative SGP4ModelLimitsErrorReason = "semi-latus rectum (pl) negative"
 	ReasonDeepSpaceUnsupported    SGP4ModelLimitsErrorReason = "deep-space orbit (period >= 225 min) not supported: SDP4 is not implemented"
+	ReasonInvalidMeanMotion       SGP4ModelLimitsErrorReason = "mean motion is not a finite positive number"
+	ReasonInvalidEccentricity     SGP4ModelLimitsErrorReason = "eccentricity is outside [0, 1)"
+	ReasonKeplerNotConverged      SGP4ModelLimitsErrorReason = "Kepler's equation did not converge"
 )
 
 // SGP4ModelLimitsError is returned when SGP4 internal mathematical limits are exceeded,
@@ -38,7 +41,11 @@ type SGP4ModelLimitsError struct {
 
 // Error returns the error message for SGP4ModelLimitsError.
 func (e *SGP4ModelLimitsError) Error() string {
-	return fmt.Sprintf("SGP4 model limits exceeded at tsince %.2f min: %s (value: %.6e). %s", e.Tsince, e.Reason, e.Value, e.Message)
+	msg := fmt.Sprintf("SGP4 model limits exceeded at tsince %.2f min: %s (value: %.6e).", e.Tsince, e.Reason, e.Value)
+	if e.Message != "" {
+		msg += " " + e.Message
+	}
+	return msg
 }
 
 // SGPError defines a custom error type for SGP4 related errors.

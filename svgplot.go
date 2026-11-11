@@ -80,14 +80,19 @@ func (p *PassDetails) GeneratePassPolarSVG() string {
 	// Zenith label (90 degrees at the center)
 	svgBuilder.WriteString(fmt.Sprintf(`<text x="%f" y="%f" fill="%s" font-size="%f" text-anchor="middle" dominant-baseline="middle">90°</text>`, float64(plotCenterX), float64(plotCenterY), secondaryColor, float64(elevationLabelFontSize)))
 
-	// Draw cardinal direction lines and labels
-	cardinalPoints := map[string]float64{
-		"N": 0, "E": 90, "S": 180, "W": 270,
+	// Draw cardinal direction lines and labels. The order is fixed so the SVG is
+	// byte-stable across renders.
+	cardinalPoints := []struct {
+		dir string
+		az  float64
+	}{
+		{"N", 0}, {"E", 90}, {"S", 180}, {"W", 270},
 	}
 	labelRadius := plotRadius + 15.0
 	tickMarkLength := 8.0
 
-	for dir, az := range cardinalPoints {
+	for _, cp := range cardinalPoints {
+		dir, az := cp.dir, cp.az
 		x_horizon, y_horizon := polarToCartesian(az, 0, plotRadius)
 		x_tick_end, y_tick_end := polarToCartesian(az, 0, plotRadius+tickMarkLength)
 		svgBuilder.WriteString(fmt.Sprintf(`<line x1="%f" y1="%f" x2="%f" y2="%f" stroke="%s" stroke-width="%s"/>`, x_horizon, y_horizon, x_tick_end, y_tick_end, foregroundColor, gridLineStrokeWidth))

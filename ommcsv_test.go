@@ -61,6 +61,59 @@ func TestParseOMMsReaderDetectsFormat(t *testing.T) {
 	}
 }
 
+func TestParseOMMsReaderSingleObject(t *testing.T) {
+	one := `{"OBJECT_NAME":"SINGLE","NORAD_CAT_ID":25544,"EPOCH":"2025-05-18T08:53:29.535936","MEAN_MOTION":15.49587957,"ECCENTRICITY":0.0002558,"INCLINATION":51.6369,"RA_OF_ASC_NODE":94.7823,"ARG_OF_PERICENTER":120.7586,"MEAN_ANOMALY":15.784}`
+	omms, err := ParseOMMsReader(strings.NewReader(one))
+	if err != nil {
+		t.Fatalf("ParseOMMsReader: %v", err)
+	}
+	if len(omms) != 1 || omms[0].NoradCatID != 25544 || omms[0].ObjectName != "SINGLE" {
+		t.Fatalf("single object not decoded: %+v", omms)
+	}
+}
+
+// TestParseOMMsCSVRejectsMalformedValues guards the numeric fields: an
+// unparsable value used to become 0 and reach the propagator as a valid set.
+func TestParseOMMsCSVRejectsMalformedValues(t *testing.T) {
+	tests := []struct {
+		name string
+		row  string
+	}{
+		{"bad mean motion", "BAD,2026-001A,2026-10-05T06:00:02.999808,abc,.00014793,53.1614,120.4004,41.5220,36.3784,0,U,100953,999,576,.1629853E-2,.54371E-3,0"},
+		{"bad catalog number", "BAD,2026-001A,2026-10-05T06:00:02.999808,15.3,.00014793,53.1614,120.4004,41.5220,36.3784,0,U,not-a-number,999,576,.1629853E-2,.54371E-3,0"},
+		{"bad bstar", "BAD,2026-001A,2026-10-05T06:00:02.999808,15.3,.00014793,53.1614,120.4004,41.5220,36.3784,0,U,100953,999,576,oops,.54371E-3,0"},
+		{"empty required field", "BAD,2026-001A,2026-10-05T06:00:02.999808,,.00014793,53.1614,120.4004,41.5220,36.3784,0,U,100953,999,576,.1629853E-2,.54371E-3,0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := strings.SplitN(ommCSVExample, "\n", 2)[0] + "\n" + tt.row + "\n"
+			if _, err := ParseOMMsCSV(strings.NewReader(data)); err == nil {
+				t.Fatal("ParseOMMsCSV accepted a malformed record")
+			}
+		})
+	}
+}
+
+func TestParseOMMsCSVRequiresColumns(t *testing.T) {
+	data := "OBJECT_NAME,NORAD_CAT_ID\nX,25544\n"
+	_, err := ParseOMMsCSV(strings.NewReader(data))
+	if err == nil || !strings.Contains(err.Error(), "EPOCH") {
+		t.Fatalf("error = %v, want a missing EPOCH column error", err)
+	}
+}
+
+func TestParseOMMsCSVOptionalFieldsMayBeAbsent(t *testing.T) {
+	data := "EPOCH,MEAN_MOTION,ECCENTRICITY,INCLINATION,RA_OF_ASC_NODE,ARG_OF_PERICENTER,MEAN_ANOMALY,NORAD_CAT_ID\n" +
+		"2026-10-05T06:00:02.999808,15.3,.00014793,53.1614,120.4004,41.5220,36.3784,25544\n"
+	omms, err := ParseOMMsCSV(strings.NewReader(data))
+	if err != nil {
+		t.Fatalf("ParseOMMsCSV: %v", err)
+	}
+	if len(omms) != 1 || omms[0].BStar != 0 || omms[0].NoradCatID != 25544 {
+		t.Fatalf("record = %+v", omms)
+	}
+}
+
 func TestToTLEAllowsMissingObjectID(t *testing.T) {
 	o := OMM{
 		ObjectName:  "NO-ID",

@@ -24,7 +24,7 @@ func main() {
 	observerAltM := 0.0 // meters
 
 	startTime := time.Now().UTC().Add(48 * time.Hour)
-	stopTime := startTime.Add(48 * time.Hour) // Predict for the next 24 hours
+	stopTime := startTime.Add(48 * time.Hour) // Predict for 48 hours, starting in 48 hours
 	stepSeconds := 10                         // Propagation step in seconds
 
 	passes, err := tle.GeneratePasses(observerLat, observerLng, observerAltM, startTime, stopTime, stepSeconds)

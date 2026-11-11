@@ -10,6 +10,25 @@ const deepSpacePeriodMin = 225.0
 
 // Initialize converts TLE data into orbital elements and SGP4 constants
 func (tle *TLE) Initialize() (*OrbitalElements, error) {
+	// Reject degenerate elements before any math. A zero mean motion makes the
+	// semi-major axis infinite and a negative one makes it NaN; eccentricity
+	// outside [0,1) makes beta imaginary. ParseTLE cannot produce these, but a
+	// hand-built TLE or an OMM conversion can.
+	if math.IsNaN(tle.MeanMotion) || math.IsInf(tle.MeanMotion, 0) || tle.MeanMotion <= 0 {
+		return nil, &SGP4ModelLimitsError{
+			Reason:  ReasonInvalidMeanMotion,
+			Value:   tle.MeanMotion,
+			Message: "mean motion must be finite and greater than zero",
+		}
+	}
+	if math.IsNaN(tle.Eccentricity) || math.IsInf(tle.Eccentricity, 0) || tle.Eccentricity < 0 || tle.Eccentricity >= 1 {
+		return nil, &SGP4ModelLimitsError{
+			Reason:  ReasonInvalidEccentricity,
+			Value:   tle.Eccentricity,
+			Message: "eccentricity must be in [0, 1)",
+		}
+	}
+
 	// Only SGP4 element sets can be propagated: type 0 is what TLE-derived sets
 	// carry (SGP), type 2 is SGP4. Type 3 (PPT3), 4 (SGP4-XP) and 6 (Special
 	// Perturbations) are different theories, so refuse them rather than return a
@@ -23,13 +42,11 @@ func (tle *TLE) Initialize() (*OrbitalElements, error) {
 	// Reject deep-space orbits up front. With no SDP4 branch, an orbit whose period
 	// is >= 225 min (MEO, GEO, HEO) would otherwise be propagated to a wrong position
 	// with no error. MeanMotion is in revolutions/day, so period(min) = 1440 / n.
-	if tle.MeanMotion > 0 {
-		if periodMin := minutesPerDay / tle.MeanMotion; periodMin >= deepSpacePeriodMin {
-			return nil, &SGP4ModelLimitsError{
-				Reason:  ReasonDeepSpaceUnsupported,
-				Value:   periodMin,
-				Message: "orbital period >= 225 min requires the SDP4 deep-space model",
-			}
+	if periodMin := minutesPerDay / tle.MeanMotion; periodMin >= deepSpacePeriodMin {
+		return nil, &SGP4ModelLimitsError{
+			Reason:  ReasonDeepSpaceUnsupported,
+			Value:   periodMin,
+			Message: "orbital period >= 225 min requires the SDP4 deep-space model",
 		}
 	}
 

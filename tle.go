@@ -70,9 +70,12 @@ func ParseTLE(input string) (*TLE, error) {
 // ParseTLELines is the same as ParseTLE except its argument is a two-line element set
 // already split into individual lines.
 func ParseTLELines(lines []string) (*TLE, error) {
+	// Work on a copy: trimming must not rewrite the caller's slice.
+	trimmed := make([]string, len(lines))
 	for i, line := range lines { // Trim spaces from each line, useful if input has trailing spaces per line
-		lines[i] = strings.TrimSpace(line)
+		trimmed[i] = strings.TrimSpace(line)
 	}
+	lines = trimmed
 
 	if len(lines) < 2 || len(lines) > 3 {
 		return nil, fmt.Errorf("invalid TLE: must contain 2 or 3 lines")
@@ -314,16 +317,14 @@ func (tle *TLE) RecoveredSemiMajorAxis() float64 {
 // IsGeostationary checks if the satellite's orbital elements from the TLE
 // suggest it is likely a geostationary satellite.
 // This is based on mean elements and does not guarantee perfect station-keeping.
+//
+// Note that Initialize refuses deep-space orbits (period >= 225 min), so a set
+// this returns true for cannot be propagated by this package; the method is
+// descriptive only.
 func (tle *TLE) IsGeostationary() bool {
-	// Thresholds for geostationary characteristics
-	const meanMotionGeoMin = 0.99 // revs/day (slightly less than 1 sidereal rotation)
-	const meanMotionGeoMax = 1.01 // revs/day (slightly more than 1 sidereal rotation)
-	// Ideal GEO mean motion is approx 1.0027 rev/day relative to fixed stars.
-	// If TLE mean motion is mean solar day relative, then it's closer to 1.0.
-	// Let's use a slightly wider band around 1.0027.
-	// Period = 1436.068 minutes -> Mean motion = 1440 / 1436.068 = 1.0027379 revs/day
-	const idealGeoMeanMotion = minutesPerDay / (minutesPerDay / 1.0027379093509) // approx 1.0027379 revs/day
-	const meanMotionTolerance = 0.05                                             // Allow +/- this much from ideal mean motion
+	// Ideal GEO mean motion is 1.0027379 revs/day (one sidereal rotation per day).
+	const idealGeoMeanMotion = 1.0027379093509
+	const meanMotionTolerance = 0.05 // Allow +/- this much from ideal mean motion
 
 	const maxInclinationDeg = 5.0 // degrees (some GEO sats have slight inclination)
 	const maxEccentricity = 0.05  // (some GEO sats have slight eccentricity)

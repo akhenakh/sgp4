@@ -5,6 +5,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -114,8 +115,10 @@ func (tle *TLE) TLELines() ([2]string, error) {
 	if tle.EpochYear < 1957 || tle.EpochYear > 2056 {
 		return lines, fmt.Errorf("sgp4: epoch year %d cannot be written in a TLE: the two-digit year covers 1957-2056", tle.EpochYear)
 	}
-	if tle.EpochDay < 1 || tle.EpochDay >= 367 {
-		return lines, fmt.Errorf("sgp4: epoch day %.8f is outside the TLE range [1, 367)", tle.EpochDay)
+	// The day-of-year field is 1-based and the year may have 365 or 366 days.
+	lastDay := float64(time.Date(tle.EpochYear, time.December, 31, 0, 0, 0, 0, time.UTC).YearDay())
+	if tle.EpochDay < 1 || tle.EpochDay >= lastDay+1 {
+		return lines, fmt.Errorf("sgp4: epoch day %.8f is outside the %d-day year %d", tle.EpochDay, int(lastDay), tle.EpochYear)
 	}
 
 	ndot, err := tleNdotField(tle.MeanMotionDot)
