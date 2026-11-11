@@ -11,7 +11,7 @@ import (
 func TestParseTLE(t *testing.T) {
 	// This TLE is from the user's original test, corresponding to the Sattrack output provided.
 	// Line 1 Checksum: 4 (Calculated: 4)
-	// Line 2 Checksum: 3 (Calculated: 2 - Note: The TLE string's checksum for L2 is non-standard)
+	// Line 2 Checksum: 3 (Calculated: 3)
 	issTLE := `1 25544U 98067A   25138.37048074  .00007749  00000+0  14567-3 0  9994
 2 25544  51.6369  94.7823 0002558 120.7586  15.7840 15.49587957510533`
 
@@ -58,7 +58,7 @@ func TestParseTLE(t *testing.T) {
 		{"Mean Anomaly", tle.MeanAnomaly, 15.7840, 1e-4, compareFloat},
 		{"Mean Motion", tle.MeanMotion, 15.49587957, 1e-8, compareFloat},
 		{"Revolution Number", tle.RevolutionNumber, 51053, 0, compareExact},
-		{"Checksum2", tle.CheckSum2, 3, 0, compareExact}, // From TLE string (note: standard calc yields 2)
+		{"Checksum2", tle.CheckSum2, 3, 0, compareExact}, // From TLE string, matching the standard calculation
 	}
 
 	for _, tt := range tests {
@@ -172,5 +172,23 @@ func TestInvalidTLE(t *testing.T) {
 				t.Errorf("ParseTLE() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestParseTLELinesDoesNotMutateInput ensures trimming stays local to the call.
+func TestParseTLELinesDoesNotMutateInput(t *testing.T) {
+	lines := []string{
+		"  ISS (ZARYA)  ",
+		"1 25544U 98067A   25138.37048074  .00007749  00000+0  14567-3 0  9994  ",
+		"2 25544  51.6369  94.7823 0002558 120.7586  15.7840 15.49587957510533  ",
+	}
+	original := append([]string(nil), lines...)
+	if _, err := ParseTLELines(lines); err != nil {
+		t.Fatalf("ParseTLELines: %v", err)
+	}
+	for i := range lines {
+		if lines[i] != original[i] {
+			t.Errorf("line %d was rewritten: %q, want %q", i, lines[i], original[i])
+		}
 	}
 }

@@ -378,3 +378,28 @@ func TestGetLookAngleInvalidLatitude(t *testing.T) {
 		t.Errorf("Expected ErrInvalidLocationLatitude for lat=-91, got %v", err)
 	}
 }
+
+// TestGetLookAngleRejectsNonFiniteLocation covers NaN/Inf coordinates, which
+// pass the range comparisons and would otherwise poison every output value.
+func TestGetLookAngleRejectsNonFiniteLocation(t *testing.T) {
+	sv := StateVector{X: 1000, Y: 1000, Z: 1000}
+
+	tests := []struct {
+		name string
+		loc  *Location
+		want error
+	}{
+		{"NaN latitude", &Location{Latitude: math.NaN()}, ErrInvalidLocationLatitude},
+		{"NaN longitude", &Location{Longitude: math.NaN()}, ErrInvalidLocationLongitude},
+		{"infinite longitude", &Location{Longitude: math.Inf(1)}, ErrInvalidLocationLongitude},
+		{"NaN altitude", &Location{Altitude: math.NaN()}, ErrInvalidLocationAltitude},
+		{"infinite altitude", &Location{Altitude: math.Inf(-1)}, ErrInvalidLocationAltitude},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := sv.GetLookAngle(tt.loc, time.Now()); err != tt.want {
+				t.Errorf("error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}

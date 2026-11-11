@@ -102,10 +102,10 @@ fmt.Println(text)
 
 ```go
 // Propagate to a specific time
-targetTime := tle.EpochTime().Add(60 * time.Minute)
-eciState, err := tle.FindPositionAtTime(targetTime)
-// Or propagate by minutes from epoch:
-// eciState, err := tle.FindPosition(60.0)
+tsince := 60.0 // minutes since the TLE epoch
+eciState, err := tle.FindPosition(tsince)
+// Or propagate to an absolute time:
+// eciState, err := tle.FindPositionAtTime(tle.EpochTime().Add(time.Hour))
 if err != nil {
 	log.Fatalf("Failed to propagate position: %v", err)
 }
@@ -203,4 +203,3 @@ Apache 2.0
 
 ## TODO
 - reuse the same mechanism to find the exact AOC a sampling more than in the lookup
-- make the min elevation a parameter

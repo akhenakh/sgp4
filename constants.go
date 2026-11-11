@@ -12,12 +12,13 @@ const (
 	xj2           = 0.001082616    // J2 harmonic (kXJ2)
 	xj3           = -0.00000253881 // J3 harmonic (kXJ3)
 	xj4           = -0.00000165597 // J4 harmonic (kXJ4)
-	torad         = math.Pi / 180.0
 	minutesPerDay = 1440.0
-	//	we            = 7.2921150e-5 // Earth's angular velocity (rad/sec) - Not directly kOMEGA_E
-	we = 1.00273790934
-	// kOMEGA_E from libsgp4 is earth rotation per sidereal day (1.00273790934)
-	// we seems to be omega_earth in rad/sec. SGP4 uses its own set of time/rotation constants.
+	// we is Earth's rotation rate in sidereal rotations per solar day
+	// (kOMEGA_E in libsgp4), a time-conversion ratio rather than an angular
+	// velocity. omegaEarthRadSec converts it to radians per second for the
+	// observer velocity used by the range-rate calculation.
+	we               = 1.00273790934
+	omegaEarthRadSec = we * twoPi / 86400.0
 
 	// Constants for ECI to Geodetic conversion, aligned with libsgp4 for comparison
 	reSGP4 = 6378.135     // Earth's equatorial radius in km (matches kXKMPER for consistency)
@@ -26,10 +27,6 @@ const (
 	// WGS-84 Earth model constants (can be kept for other uses if needed, but ToGeodetic will use SGP4 ones)
 	reWGS84 = 6378.137            // Earth's equatorial radius in km
 	fWGS84  = 1.0 / 298.257223563 // Earth's flattening factor
-
-	// WGS-84 Earth model constants
-	re = 6378.137            // Earth's equatorial radius in km
-	f  = 1.0 / 298.257223563 // Earth's flattening factor
 )
 
 // Computed values (non-constants) - these are based on SGP4's specific constants like xkmper

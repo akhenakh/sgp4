@@ -11,6 +11,12 @@ var ErrLocationNil = &SGPError{"location cannot be nil"}
 // ErrInvalidLocationLatitude is returned for invalid latitude.
 var ErrInvalidLocationLatitude = &SGPError{"invalid location latitude"}
 
+// ErrInvalidLocationLongitude is returned for a NaN longitude.
+var ErrInvalidLocationLongitude = &SGPError{"invalid location longitude"}
+
+// ErrInvalidLocationAltitude is returned for a NaN or infinite altitude.
+var ErrInvalidLocationAltitude = &SGPError{"invalid location altitude"}
+
 // Location represents a ground station or observation point on Earth
 type Location struct {
 	Latitude  float64 // Latitude in degrees (North positive)
@@ -73,11 +79,19 @@ func (sv *StateVector) GetLookAngle(loc *Location, currentDateTime time.Time) (*
 		return nil, ErrLocationNil
 	}
 
-	// Validate latitude range
-	if loc.Latitude < -90 || loc.Latitude > 90 {
+	// Validate latitude range and reject NaN, which would otherwise pass the
+	// comparisons below and poison the output.
+	if math.IsNaN(loc.Latitude) || loc.Latitude < -90 || loc.Latitude > 90 {
 		return nil, ErrInvalidLocationLatitude
 	}
-	// Longitude will be wrapped by math.Sin/Cos, altitude can be anything.
+	if math.IsNaN(loc.Longitude) || math.IsInf(loc.Longitude, 0) {
+		return nil, ErrInvalidLocationLongitude
+	}
+	if math.IsNaN(loc.Altitude) || math.IsInf(loc.Altitude, 0) {
+		return nil, ErrInvalidLocationAltitude
+	}
+	// Longitude is wrapped by math.Sin/Cos; only non-finite values are rejected.
+	// Altitude can be any finite value.
 
 	// Convert observer lat/lon to radians
 	obsLatRad := loc.Latitude * deg2rad
@@ -143,7 +157,14 @@ func (sv *StateVector) GetLookAngle(loc *Location, currentDateTime time.Time) (*
 	topZ := cosLatObs*cosLstObs*rx + cosLatObs*sinLstObs*ry + sinLatObs*rz
 
 	// Azimuth and Elevation
-	elRad := math.Asin(topZ / range_)
+	sinEl := topZ / range_
+	// Guard the domain of Asin against rounding at the horizon.
+	if sinEl > 1 {
+		sinEl = 1
+	} else if sinEl < -1 {
+		sinEl = -1
+	}
+	elRad := math.Asin(sinEl)
 	azRad := AcTan(topE, -topS)
 	// Then apply C++ style quadrant corrections or rely on AcTan's range (0 to 2PI if implemented like C++)
 	// The provided AcTan returns [0, 2*PI), which simplifies things if that's the desired range.
@@ -155,11 +176,11 @@ func (sv *StateVector) GetLookAngle(loc *Location, currentDateTime time.Time) (*
 	elevation := elRad * rad2deg
 
 	// Range Rate calculation
-	// Observer velocity in ECI (due to Earth rotation)
-	// omega_earth_rad_sec = 7.2921150e-5 (from constants.go we)
-	obsVXeci := -we * obsYeci // vx = -omega_earth * y_eci
-	obsVYeci := we * obsXeci  // vy =  omega_earth * x_eci
-	obsVZeci := 0.0           // vz = 0
+	// Observer velocity in ECI (due to Earth rotation), using the angular
+	// velocity in rad/s rather than the rotations-per-day ratio.
+	obsVXeci := -omegaEarthRadSec * obsYeci // vx = -omega_earth * y_eci
+	obsVYeci := omegaEarthRadSec * obsXeci  // vy =  omega_earth * x_eci
+	obsVZeci := 0.0                         // vz = 0
 
 	deltaVX := sv.VX - obsVXeci
 	deltaVY := sv.VY - obsVYeci
